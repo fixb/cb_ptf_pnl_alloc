@@ -118,10 +118,11 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
 .chart rect.hit:hover + rect{filter:brightness(1.15)}
 .chart path.ln{fill:none;stroke-width:2}
 .chart path.ln.a{stroke:var(--accent)} .chart path.ln.b{stroke:var(--info)}
+.chart path.ln.bm{stroke:var(--muted);stroke-dasharray:6 4;stroke-width:1.5}
 .chart path.ln.ref{stroke:var(--faint);stroke-width:1;stroke-dasharray:4 3}
 .chart rect.band{fill:var(--accent);opacity:.09}
 .chart circle.bub{fill:var(--info);fill-opacity:.28;stroke:var(--info);stroke-width:1;cursor:default} .chart circle.bub:hover{fill-opacity:.55}
-.chart circle.mk{fill:var(--panel);stroke-width:2} .chart circle.mk.now{stroke:var(--fg)} .chart circle.mk.max{stroke:var(--accent)}
+.chart circle.mk{fill:var(--panel);stroke-width:2} .chart circle.mk.now{stroke:var(--fg)} .chart circle.mk.max{stroke:var(--accent)} .chart circle.mk.bmk{stroke:var(--muted)}
 .tip{position:fixed;z-index:20;pointer-events:none;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:8px 10px;font-size:12px;max-width:280px;box-shadow:0 6px 20px rgba(0,0,0,.35);display:none}
 .tip b{display:block;margin-bottom:4px}
 .tip .num{display:flex;justify-content:space-between;gap:12px}
@@ -163,14 +164,16 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
       </div>
     </div>
     <div class="drop" id="drop">
-      <label for="files" style="cursor:pointer;display:block">Drop the four files here (two BgAM exposure reports .xlsx, two UCBINDEX .xls) or <u>browse</u>. Files are detected and paired by date automatically; nothing leaves your browser.</label>
+      <label for="files" style="cursor:pointer;display:block">Drop the files here (two BgAM exposure reports .xlsx, two UCBINDEX pricing files, optionally two UCBINDEX benchmark files) or <u>browse</u>. Files are detected and paired by date and index code; nothing leaves your browser.</label>
       <input id="files" type="file" multiple accept=".xls,.xlsx">
     </div>
     <div class="slots" style="margin-top:10px">
       <div class="slot" id="slotE0"><span class="k">Exposure · T0</span><span class="v">—</span><span class="d">BgAM Exposure Report</span></div>
       <div class="slot" id="slotE1"><span class="k">Exposure · T1</span><span class="v">—</span><span class="d">BgAM Exposure Report</span></div>
-      <div class="slot" id="slotI0"><span class="k">Index · T0</span><span class="v">—</span><span class="d">UCBINDEX constituent file</span></div>
-      <div class="slot" id="slotI1"><span class="k">Index · T1</span><span class="v">—</span><span class="d">UCBINDEX constituent file</span></div>
+      <div class="slot" id="slotI0"><span class="k">Pricing index · T0</span><span class="v">—</span><span class="d">UCBINDEX constituent file</span></div>
+      <div class="slot" id="slotI1"><span class="k">Pricing index · T1</span><span class="v">—</span><span class="d">UCBINDEX constituent file</span></div>
+      <div class="slot" id="slotB0"><span class="k">Benchmark · T0</span><span class="v">—</span><span class="d">optional, defaults to pricing index</span></div>
+      <div class="slot" id="slotB1"><span class="k">Benchmark · T1</span><span class="v">—</span><span class="d">optional, defaults to pricing index</span></div>
     </div>
     <p class="muted small" style="margin-top:8px" id="loadmsg"></p>
   </section>
@@ -178,6 +181,8 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
   <section class="panel" id="settingsPanel">
     <div class="head"><h2>Settings</h2><span class="muted small">Greeks are taken from the index file at T0 unless set otherwise.</span></div>
     <div class="settings">
+      <div class="field"><label for="setBench">Benchmark index</label>
+        <select id="setBench"><option value="">Load index files first</option></select></div>
       <div class="field"><label for="setGreeks">Greeks</label>
         <select id="setGreeks"><option value="t0">Start of period (T0)</option><option value="mid">Midpoint (average T0/T1)</option></select></div>
       <div class="field"><label for="setGamma">Gamma</label>
@@ -212,7 +217,7 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
           <button class="tab" role="tab" data-view="sector" type="button">By sector</button>
           <button class="tab" role="tab" data-view="bonds" type="button">Bonds</button>
           <button class="tab" role="tab" data-view="overlay" type="button">Overlay</button>
-          <button class="tab" role="tab" data-view="bench" type="button">Index benchmark</button>
+          <button class="tab" role="tab" data-view="bench" type="button">vs Benchmark</button>
           <button class="tab" role="tab" data-view="checks" type="button">Data checks</button>
           <button class="tab" role="tab" data-view="method" type="button">Method</button>
         </div>
@@ -253,10 +258,10 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
           <div class="tiles" id="cvxTiles"></div>
           <div class="two" style="margin-top:16px">
             <div><h3>Composite convertible: price vs parity</h3><div class="chart" id="chCvxPrice" style="margin-top:8px"></div>
-              <div class="legend"><span><i style="background:var(--accent)"></i>Composite price</span><span><i style="background:var(--faint)"></i>Parity (45°) and bond floor</span><span><i style="background:var(--accent);opacity:.25"></i>±1σ move</span><span class="muted">Bubbles: positions, sized by MV, coloured by strategy</span></div>
+              <div class="legend"><span><i style="background:var(--accent)"></i>Composite price</span><span><i style="background:var(--faint)"></i>Parity (45°) and bond floor</span><span><i style="background:var(--muted)"></i>Benchmark composite (dashed)</span><span><i style="background:var(--accent);opacity:.25"></i>±1σ move</span><span class="muted">Bubbles: positions, sized by MV, coloured by strategy</span></div>
               <div class="legend" id="cvxStratLegend"></div></div>
             <div><h3>Delta vs equity move</h3><div class="chart" id="chCvxDelta" style="margin-top:8px"></div>
-              <div class="legend"><span><i style="background:var(--accent)"></i>Composite CB delta, %</span><span><i style="background:var(--info)"></i>Net portfolio delta incl. overlay, % AUM</span></div></div>
+              <div class="legend"><span><i style="background:var(--accent)"></i>Composite CB delta, %</span><span><i style="background:var(--info)"></i>Net portfolio delta incl. overlay, % AUM</span><span><i style="background:var(--muted)"></i>Benchmark composite δ (dashed)</span></div></div>
           </div>
           <h3 style="margin-top:16px">Scenarios: all stocks move together</h3>
           <div class="tblwrap" id="tblCvx" style="margin-top:6px"></div>
@@ -280,8 +285,21 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
           <div class="tblwrap" id="tblOverlay"></div>
         </div>
         <div class="view" id="view-bench" hidden style="padding-top:12px">
-          <p class="note" style="margin-bottom:10px">Same decomposition applied to every constituent of the index file, weighted by index weight at T0, in local currency on clean prices plus coupon accrual. Approximates the index's hedged return; constituents missing on one date are dropped.</p>
-          <div class="tblwrap" id="tblBench"></div>
+          <p class="muted small" id="benchName" style="margin-bottom:10px"></p>
+          <div class="tiles" id="benchTiles"></div>
+          <div class="two" style="margin-top:16px">
+            <div><h3>Characteristics at T1</h3><div class="tblwrap" id="tblBenchChar" style="margin-top:6px"></div></div>
+            <div><div class="row" style="justify-content:space-between"><h3>Relative performance</h3>
+              <select id="benchGroup" class="btn"><option value="region">By region</option><option value="sector">By sector</option></select></div>
+              <div class="tblwrap" id="tblBrinson" style="margin-top:6px"></div></div>
+          </div>
+          <div class="two" style="margin-top:16px">
+            <div><h3>Largest overweights</h3><div class="tblwrap" id="tblOver" style="margin-top:6px"></div></div>
+            <div><h3>Largest underweights</h3><div class="tblwrap" id="tblUnder" style="margin-top:6px"></div></div>
+          </div>
+          <h3 style="margin-top:16px">P&amp;L decomposition</h3>
+          <div class="tblwrap" id="tblBench" style="margin-top:6px"></div>
+          <p class="muted small" style="margin-top:6px">Benchmark: the decomposition is applied to every constituent, weighted by index weight at T0, in local currency on clean prices plus coupon accrual (an approximation of the hedged return; constituents missing on one date are dropped). Portfolio returns are on CB market value at T0 and exclude the pricing basis, so both sides rest on index prices. Relative performance: allocation = (w<sub>p</sub> − w<sub>b</sub>) × (R<sub>b,group</sub> − R<sub>b</sub>), selection = w<sub>p</sub> × (R<sub>p,group</sub> − R<sub>b,group</sub>), interaction included in selection; weights in % of CB market value.</p>
         </div>
         <div class="view" id="view-checks" hidden style="padding-top:12px"><div id="checks"></div></div>
         <div class="view" id="view-method" hidden style="padding-top:12px">
@@ -394,11 +412,14 @@ function parseIndex(rows, fname){
   for (const r of rows){ if (!r) continue; for (const cell of r){ const m = cell && String(cell).match(/Data as of\s+\d{1,2}:\d{2}\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/); if (m){ const mo=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].toLowerCase()); asof=new Date(Date.UTC(+m[3],mo,+m[1])); break; } } if (asof) break; }
   const hi = rows.findIndex(r => r && norm(r[0])==='mace id');
   if (hi<0) throw new Error(fname+': "MACE ID" header not found');
+  const titles = rows.slice(0,hi).map(r=>(r||[]).filter(c=>c!=null&&c!=='').join(' ').trim()).filter(Boolean);
+  const iname = titles.find(t=>/index/i.test(t) && !/^ftse convertible bond index$/i.test(t)) || titles[0] || 'Index';
+  const code = (String(fname).match(/UCBINDEX(\d{3,4})/i)||[])[1] || iname;
   const hdr = rows[hi];
   const c = {
     mace:0, isin:findCol(hdr,'isin'), name:findCol(hdr,'issue'), cpn:findCol(hdr,'coupon'), ccy:findCol(hdr,'bond currency'),
     P:findCol(hdr,'convertible price'), S:findCol(hdr,'equity price'), par:findCol(hdr,'parity'), delta:findCol(hdr,'delta'),
-    cs:findCol(hdr,'credit spread'), inv:findCol(hdr,'inv value'), ytm:findCol(hdr,'yield to mat'), dur:findCol(hdr,'duration'),
+    cs:findCol(hdr,'credit spread'), inv:findCol(hdr,'inv value'), prem:findCol(hdr,'conversion premium'), pinv:findCol(hdr,'prem to inv'), ytm:findCol(hdr,'yield to mat'), dur:findCol(hdr,'duration'),
     w:findCol(hdr,'index weight'), region:findCol(hdr,'region'), sector:findCol(hdr,'sector'), country:findCol(hdr,'country'),
     iv:findCol(hdr,'implied vol'), gamma:findCol(hdr,'gamma'), rho:findCol(hdr,'rho'), vega:findCol(hdr,'vega'), chi:findCol(hdr,'chi'),
     ric:findCol(hdr,'ric code'), regs:findCol(hdr,'isin regulation s'), a144:findCol(hdr,'isin 144a'), reg:findCol(hdr,'isin registered')
@@ -407,12 +428,12 @@ function parseIndex(rows, fname){
   for (let i=hi+1;i<rows.length;i++){
     const r = rows[i]; if (!r || num(r[0])==null) continue;
     const rec = {mace:r[0], isin:r[c.isin], name:r[c.name], cpn:num(r[c.cpn]), ccy:r[c.ccy], P:num(r[c.P]), S:num(r[c.S]), par:num(r[c.par]), delta:num(r[c.delta]),
-      cs:num(r[c.cs]), inv:num(r[c.inv]), ytm:num(r[c.ytm]), dur:num(r[c.dur]), w:num(r[c.w]), region:r[c.region], sector:r[c.sector], country:r[c.country],
+      cs:num(r[c.cs]), inv:num(r[c.inv]), prem:num(r[c.prem]), pinv:num(r[c.pinv]), ytm:num(r[c.ytm]), dur:num(r[c.dur]), w:num(r[c.w]), region:r[c.region], sector:r[c.sector], country:r[c.country],
       iv:num(r[c.iv]), gamma:num(r[c.gamma]), rho:num(r[c.rho]), vega:num(r[c.vega]), chi:num(r[c.chi]), ric:r[c.ric]};
     list.push(rec);
     for (const k of [c.isin,c.regs,c.a144,c.reg]) if (k>=0 && r[k]) byIsin[String(r[k]).trim()] = rec;
   }
-  return {kind:'index', date:asof, byIsin, list, fname};
+  return {kind:'index', date:asof, byIsin, list, fname, code, iname};
 }
 function detectAndParse(wb, fname){
   const names = wb.SheetNames;
@@ -427,23 +448,39 @@ function detectAndParse(wb, fname){
 }
 
 /* ===================== state ===================== */
-const S = { files:{E0:null,E1:null,I0:null,I1:null}, parsed:[], res:null, sort:{key:'total',dir:-1}, expoSort:{key:'eq',dir:-1}, unit:'eur', overlayS:{} };
+const S = { files:{E0:null,E1:null,I0:null,I1:null,B0:null,B1:null}, parsed:[], res:null, sort:{key:'total',dir:-1}, expoSort:{key:'eq',dir:-1}, unit:'eur', overlayS:{} };
 
+// Index files are grouped by UCBINDEX code: the benchmark is the chosen code (0204 by default),
+// pricing uses the broadest other code, with the benchmark file filling ISINs it lacks.
+function lastTwo(list){ const l=[...list].sort((a,b)=>(a.date||0)-(b.date||0)); return l.length>=2 ? [l[l.length-2], l[l.length-1]] : [l[0]||null, null]; }
+function mergeIdx(pr, bm){ if (!pr || !bm || pr===bm) return pr; return {...pr, byIsin:{...bm.byIsin, ...pr.byIsin}}; }
 function assignSlots(){
   const ex = S.parsed.filter(p=>p.kind==='expo').sort((a,b)=>(a.date||0)-(b.date||0));
-  const ix = S.parsed.filter(p=>p.kind==='index').sort((a,b)=>(a.date||0)-(b.date||0));
-  S.files.E0 = ex.length>=2 ? ex[ex.length-2] : (ex[0]||null); S.files.E1 = ex.length>=2 ? ex[ex.length-1] : null;
-  S.files.I0 = ix.length>=2 ? ix[ix.length-2] : (ix[0]||null); S.files.I1 = ix.length>=2 ? ix[ix.length-1] : null;
-  for (const k of ['E0','E1','I0','I1']){
-    const el = $('#slot'+k), f = S.files[k];
+  const ix = S.parsed.filter(p=>p.kind==='index');
+  const codes = {}; for (const p of ix) (codes[p.code] || (codes[p.code] = {code:p.code, iname:p.iname, files:[], n:0})).files.push(p);
+  for (const c of Object.values(codes)) c.n = Math.max(...c.files.map(f=>f.list.length));
+  const saved = load('cbpnl.benchCode', null), cl = Object.values(codes);
+  const bench = codes[saved] || codes['0204'] || (cl.length>1 ? cl.sort((a,b)=>a.n-b.n)[0] : cl[0]);
+  const pricing = cl.filter(c=>c!==bench).sort((a,b)=>b.n-a.n)[0] || bench;
+  const sel = $('#setBench');
+  sel.innerHTML = cl.length ? cl.map(c=>`<option value="${esc(c.code)}">${esc(c.iname)} (${esc(c.code)}, ${c.n})</option>`).join('') : '<option value="">Load index files first</option>';
+  if (bench) sel.value = bench.code;
+  [S.files.E0, S.files.E1] = ex.length>=2 ? [ex[ex.length-2], ex[ex.length-1]] : [ex[0]||null, null];
+  const [p0, p1] = pricing ? lastTwo(pricing.files) : [null, null];
+  const [b0, b1] = bench && bench!==pricing ? lastTwo(bench.files) : [p0, p1];
+  S.files.I0 = mergeIdx(p0, b0); S.files.I1 = mergeIdx(p1, b1); S.files.B0 = b0; S.files.B1 = b1;
+  const shown = {E0:S.files.E0, E1:S.files.E1, I0:p0, I1:p1, B0:bench!==pricing?b0:null, B1:bench!==pricing?b1:null};
+  for (const k of ['E0','E1','I0','I1','B0','B1']){
+    const el = $('#slot'+k), f = shown[k];
     el.classList.toggle('ok', !!f);
-    el.querySelector('.v').textContent = f ? f.fname : '—';
-    el.querySelector('.d').textContent = f ? (f.kind==='expo' ? ('Report date '+fmtDate(f.date)) : ('Data as of '+fmtDate(f.date))) : (k[0]==='E'?'BgAM Exposure Report':'UCBINDEX constituent file');
+    el.querySelector('.v').textContent = f ? f.fname : (k[0]==='B' && p0 ? 'same as pricing index' : '—');
+    el.querySelector('.d').textContent = f ? (f.kind==='expo' ? ('Report date '+fmtDate(f.date)) : (`${f.iname} · ${f.list.length} bonds · as of ${fmtDate(f.date)}`)) : (k[0]==='E'?'BgAM Exposure Report':k[0]==='I'?'UCBINDEX constituent file':'optional, defaults to pricing index');
   }
   const ok = S.files.E0 && S.files.E1 && S.files.I0 && S.files.I1;
-  $('#loadmsg').textContent = ok ? '' : `Loaded ${ex.length}/2 exposure reports and ${ix.length}/2 index files.`;
+  $('#loadmsg').textContent = ok ? '' : `Loaded ${ex.length}/2 exposure reports and ${ix.length} index files (need two dates of the pricing index).`;
   if (ok) run();
 }
+$('#setBench').addEventListener('change',e=>{ store('cbpnl.benchCode', e.target.value); assignSlots(); });
 
 async function handleFiles(fileList){
   const files = Array.from(fileList);
@@ -453,7 +490,7 @@ async function handleFiles(fileList){
       const buf = await f.arrayBuffer();
       const wb = XLSX.read(buf, {type:'array', cellDates:false});
       const p = detectAndParse(wb, f.name);
-      S.parsed = S.parsed.filter(q => !(q.kind===p.kind && q.date && p.date && q.date.getTime()===p.date.getTime()));
+      S.parsed = S.parsed.filter(q => !(q.kind===p.kind && q.code===p.code && q.date && p.date && q.date.getTime()===p.date.getTime()));
       S.parsed.push(p);
     }catch(e){ console.error(e); toast(String(e.message||e)); }
   }
@@ -583,21 +620,23 @@ function run(){
     ovl.push({...o0, o1, ccy, S0, S1, proxy, pnl, dPart, note, key});
   }
   // benchmark
-  const bench = {comps:zeroComps(), total:0, n:0, dropped:0, byRegion:{}};
-  const wsum = I0.list.reduce((a,b)=>a+(b.w||0),0) || 100;
-  for (const b0 of I0.list){
-    const b1 = I1.byIsin[b0.isin]; if (!b1 || !b0.P || b0.w==null){ bench.dropped++; continue; }
+  const {B0, B1} = S.files;
+  const bench = {comps:zeroComps(), total:0, n:0, dropped:0, byRegion:{}, bonds:[], name:B0.iname, code:B0.code};
+  const wsum = B0.list.reduce((a,b)=>a+(b.w||0),0) || 100;
+  for (const b0 of B0.list){
+    const b1 = B1.byIsin[b0.isin]; if (!b1 || !b0.P || b0.w==null){ bench.dropped++; continue; }
     const d = decompose(b0,b1,set,days);
     const w = b0.w/wsum; const f = w/b0.P*1e4; // -> bps of index
     const reg = b0.region||'n/a'; const R = bench.byRegion[reg] || (bench.byRegion[reg] = {comps:zeroComps(), total:0, w:0});
     for (const [k] of COMPS){ if (k==='basis') continue; const v = (d[k]||0)*f; bench.comps[k]+=v; R.comps[k]+=v; }
     const tot = (d.dP + d.carry)*f; bench.total += tot; R.total += tot; R.w += w*100; bench.n++;
+    bench.bonds.push({rec:b0, w, r:(d.dP + d.carry)/b0.P});
   }
   // totals
   const tot = zeroComps(); tot.total=0; let fxtr=0;
   for (const r of rows){ for (const k in r.eur) tot[k]+=r.eur[k]; fxtr+=r.fxtr; }
   const ovlTot = ovl.reduce((a,o)=>a+(o.pnl||0),0);
-  const expo = {s0:expoSnap(E0,I0,E1.aum), s1:expoSnap(E1,I1,E0.aum)};
+  const expo = {s0:expoSnap(E0,I0,E1.aum,B0), s1:expoSnap(E1,I1,E0.aum,B1)};
   S.res = {rows, tot, fxtr, ovl, ovlTot, bench, aum, days, set, checks, dayAuto, expo};
   render();
 }
@@ -636,7 +675,7 @@ function optGreeks(o, date){
   return out;
 }
 // One snapshot per date: each exposure report with the index file of the same date.
-function expoSnap(E, I, aumAlt){
+function expoSnap(E, I, aumAlt, B){
   const aum = E.aum || aumAlt || 1, rows = [], regionOf = {};
   for (const p of Object.values(E.cbs)){
     const i = I.byIsin[p.isin];
@@ -668,7 +707,7 @@ function expoSnap(E, I, aumAlt){
   for (const o of ovl){ tot.ovl+=o.eq; tot.gamma+=o.gamma||0; tot.vega+=o.vega||0; tot.theta+=o.theta||0; tot.optTheta+=o.theta||0; }
   tot.net = tot.eq + tot.ovl; tot.avgDelta = tot.mv ? tot.dmv/tot.mv : null; tot.avgDur = tot.mvDur ? tot.durMv/tot.mvDur : null;
   const idx = {region:{}, sector:{}, ccy:{}, w:0, dw:0};
-  for (const b of I.list){ if (!b.w) continue; idx.w+=b.w; if (b.delta!=null) idx.dw+=b.w*b.delta; for (const k of ['region','sector','ccy']){ const g=b[k]||'n/a'; idx[k][g]=(idx[k][g]||0)+b.w; } }
+  for (const b of (B||I).list){ if (!b.w) continue; idx.w+=b.w; if (b.delta!=null) idx.dw+=b.w*b.delta; for (const k of ['region','sector','ccy']){ const g=b[k]||'n/a'; idx[k][g]=(idx[k][g]||0)+b.w; } }
   idx.avgDelta = idx.w ? idx.dw/idx.w : null;
   return {aum, rows, ovl, tot, idx, date:E.date};
 }
@@ -698,7 +737,7 @@ function renderExpo(){
   const tS = (k, key, unit) => `<div class="tile"><span class="k">${k}</span><span class="v">${fmtS(t1[key],0)}</span><span class="s">€ ${unit} · ${fmtS(bps(t1[key]),2)} bps · ${chg(t1[key]-t0[key],0,' €')}</span></div>`;
   $('#expoTiles').innerHTML =
     tP('Net equity delta','net','hero') + tP('CB equity delta','eq') + tP('Overlay delta','ovl') + tP('CB market value','mv') +
-    `<div class="tile"><span class="k">Avg delta (MV-weighted)</span><span class="v">${fmtN(t1.avgDelta,1)}%</span><span class="s">index ${fmtN(s1.idx.avgDelta,1)}% · ${chg((t1.avgDelta||0)-(t0.avgDelta||0),1,' pp')}</span></div>` +
+    `<div class="tile"><span class="k">Avg delta (MV-weighted)</span><span class="v">${fmtN(t1.avgDelta,1)}%</span><span class="s">benchmark ${fmtN(s1.idx.avgDelta,1)}% · ${chg((t1.avgDelta||0)-(t0.avgDelta||0),1,' pp')}</span></div>` +
     tS('Gamma','gamma','per +1% stocks') + tS('Vega','vega','per vol pt') + tS('CS01','cs01','per +1 bp spread') +
     `<div class="tile"><span class="k">Theta</span><span class="v">${fmtS(t1.theta,0)}</span><span class="s">€ per day · CB decay ${fmtS(t1.decay,0)} · CB carry ${fmtS(t1.carry,0)} · options ${fmtS(t1.optTheta,0)} · ${chg(t1.theta-t0.theta,0,' €')}</span></div>` +
     `<div class="tile"><span class="k">DV01</span><span class="v">${fmtS(t1.dv01,0)}</span><span class="s">€ per +1 bp rates · ${fmtS(bps(t1.dv01),2)} bps · avg duration ${fmtN(t1.avgDur,2)} · ${chg(t1.dv01-t0.dv01,0,' €')}</span></div>`;
@@ -731,7 +770,7 @@ function renderExpoGroup(){
       <td class="num">${x.mv?fmtN(x.dmv/x.mv,1):'—'}</td><td class="num">${fmtS(pA(x.eq,s1.aum),2)}</td><td class="num">${fmtS(pA(x.ovl,s1.aum),2)}</td><td class="num ${x.net<0?'neg':'pos'}">${fmtS(pA(x.net,s1.aum),2)}</td><td class="num">${fmtS(d,2)}</td>
       <td class="num">${fmtS(x.gamma,0)}</td><td class="num">${fmtS(x.vega,0)}</td><td class="num">${fmtS(x.cs01,0)}</td><td class="num">${fmtS(x.dv01,0)}</td><td class="num">${fmtS(x.theta,0)}</td></tr>`;
   };
-  $('#tblExpoGroup').innerHTML = `<table><thead><tr><th class="l">${esc(label)}</th><th>#</th><th>MV % AUM</th><th>Wt % CBs</th>${idxW?'<th>Wt % index</th>':''}<th>Avg δ</th><th>CB Δ %</th><th>Overlay Δ %</th><th>Net Δ %</th><th>Chg pp</th><th>Gamma €/1%</th><th>Vega €/pt</th><th>CS01 €/bp</th><th>DV01 €/bp</th><th>Theta €/d</th></tr></thead><tbody>
+  $('#tblExpoGroup').innerHTML = `<table><thead><tr><th class="l">${esc(label)}</th><th>#</th><th>MV % AUM</th><th>Wt % CBs</th>${idxW?'<th>Wt % bench</th>':''}<th>Avg δ</th><th>CB Δ %</th><th>Overlay Δ %</th><th>Net Δ %</th><th>Chg pp</th><th>Gamma €/1%</th><th>Vega €/pt</th><th>CS01 €/bp</th><th>DV01 €/bp</th><th>Theta €/d</th></tr></thead><tbody>
     ${list.map(x=>line(x,g0[x.k])).join('')}${line(T,null,'tot')}</tbody></table>`;
 }
 const EXPO_COLS = [
@@ -783,16 +822,35 @@ const normPdf = x => Math.exp(-x*x/2)/Math.sqrt(2*Math.PI);
 const callX = (x,k,v) => { const d1=(Math.log(x/k)+v*v/2)/v; return {c:x*normCdf(d1)-k*normCdf(d1-v), d:normCdf(d1), g:normPdf(d1)/v}; }; // spot normalised to 1
 function calib(delta, v){ const d1=invNorm(Math.min(0.995,Math.max(0.005,delta))); return {k:Math.exp(-d1*v+v*v/2), c0:null}; }
 const CVX_MOVES = Array.from({length:151},(_,j)=>-0.5+j*0.01);
+function cbLeg(i, perPt){
+  const d = Math.min(0.995,Math.max(0.005,i.delta/100));
+  let v = i.gamma>0 ? normPdf(invNorm(d))/i.gamma : null;
+  if (!(v>0.05 && v<3)) v = (i.iv||30)/100*Math.sqrt(3);
+  const {k} = calib(d,v);
+  return {kind:'cb', perPt, par:i.par, P:i.P, inv:i.inv, k, v, c0:callX(1,k,v).c, iv:i.iv};
+}
+function profile(legs, aum){
+  const pts = CVX_MOVES.map(m=>{
+    const x = 1+m; let V=0, par=0, dpar=0, w=0, floor=0, cbEq=0, ovEq=0, ovPnl=0;
+    for (const L of legs){
+      if (L.kind==='cb'){ const q=callX(x,L.k,L.v); V+=L.perPt*(L.P+L.par*(q.c-L.c0)); par+=L.perPt*L.par*x; dpar+=L.perPt*L.par*x*q.d; w+=L.perPt; floor+=L.perPt*(L.inv!=null?L.inv:L.P-L.par*L.c0); cbEq+=L.perPt*L.par*x*q.d; }
+      else if (L.kind==='lin'){ V+=L.perPt*(L.P+L.par*L.d*m); par+=L.perPt*L.par*x; dpar+=L.perPt*L.par*x*L.d; w+=L.perPt; floor+=L.perPt*L.P; cbEq+=L.perPt*L.par*x*L.d; }
+      else if (L.kind==='opt'){ const q=callX(x,L.k,L.v), dd=L.put?q.d-1:q.d, c=L.put?q.c-x+L.k:q.c, c0=L.put?L.c0-1+L.k:L.c0; ovEq+=L.notional*x*dd; ovPnl+=L.notional*(c-c0); }
+      else { ovEq+=L.expo*x; ovPnl+=L.expo*m; }
+    }
+    return {m, V, price:V/w, parity:par/w, floor:floor/w, delta:dpar/par*100, cbEq, ovEq, net:(cbEq+ovEq)/aum*100, ovPnl};
+  });
+  pts.forEach((p,j)=>{ const a=pts[Math.max(0,j-1)], b=pts[Math.min(pts.length-1,j+1)]; p.gamma=(b.delta-a.delta)/(Math.log(1+b.m)-Math.log(1+a.m))/100; });
+  let jMax = 1; for (let j=1;j<pts.length-1;j++) if (pts[j].gamma>pts[jMax].gamma) jMax=j;
+  let vw=0, ww=0; for (const L of legs) if (L.kind==='cb' && L.iv){ const wt=L.perPt*L.par; vw+=wt*L.iv; ww+=wt; }
+  return {pts, j0:CVX_MOVES.findIndex(m=>Math.abs(m)<1e-9), jMax, iv:ww?vw/ww:25};
+}
 function convexity(){
   const s = S.res.expo.s1, legs = [];
   for (const r of s.rows){
     const i = r.ix;
     if (!i || i.par==null || i.delta==null || i.P==null){ legs.push({kind:'lin', perPt:r.perPt, par:r.par||0, d:(r.delta||0)/100, P:i&&i.P!=null?i.P:r.mv/r.perPt}); continue; }
-    const d = Math.min(0.995,Math.max(0.005,i.delta/100));
-    let v = i.gamma>0 ? normPdf(invNorm(d))/i.gamma : null;
-    if (!(v>0.05 && v<3)) v = (i.iv||30)/100*Math.sqrt(3);
-    const {k} = calib(d,v);
-    legs.push({kind:'cb', perPt:r.perPt, par:i.par, P:i.P, inv:i.inv, k, v, c0:callX(1,k,v).c, iv:i.iv});
+    legs.push(cbLeg(i, r.perPt));
   }
   for (const o of s.ovl){
     const raw = o.raw;
@@ -802,26 +860,14 @@ function convexity(){
       legs.push({kind:'opt', notional:raw.expo/raw.delta, k, v, put, c0:callX(1,k,v).c});
     } else legs.push({kind:'fut', expo:o.eq});
   }
-  const pts = CVX_MOVES.map(m=>{
-    const x = 1+m; let V=0, par=0, dpar=0, w=0, floor=0, cbEq=0, ovEq=0, ovPnl=0;
-    for (const L of legs){
-      if (L.kind==='cb'){ const q=callX(x,L.k,L.v); V+=L.perPt*(L.P+L.par*(q.c-L.c0)); par+=L.perPt*L.par*x; dpar+=L.perPt*L.par*x*q.d; w+=L.perPt; floor+=L.perPt*(L.inv!=null?L.inv:L.P-L.par*L.c0); cbEq+=L.perPt*L.par*x*q.d; }
-      else if (L.kind==='lin'){ V+=L.perPt*(L.P+L.par*L.d*m); par+=L.perPt*L.par*x; dpar+=L.perPt*L.par*x*L.d; w+=L.perPt; floor+=L.perPt*L.P; cbEq+=L.perPt*L.par*x*L.d; }
-      else if (L.kind==='opt'){ const q=callX(x,L.k,L.v), dd=L.put?q.d-1:q.d, c=L.put?q.c-x+L.k:q.c, c0=L.put?L.c0-1+L.k:L.c0; ovEq+=L.notional*x*dd; ovPnl+=L.notional*(c-c0); }
-      else { ovEq+=L.expo*x; ovPnl+=L.expo*m; }
-    }
-    return {m, V, price:V/w, parity:par/w, floor:floor/w, delta:dpar/par*100, cbEq, ovEq, net:(cbEq+ovEq)/s.aum*100, ovPnl};
-  });
-  const j0 = CVX_MOVES.findIndex(m=>Math.abs(m)<1e-9);
-  pts.forEach((p,j)=>{ const a=pts[Math.max(0,j-1)], b=pts[Math.min(pts.length-1,j+1)]; p.gamma=(b.delta-a.delta)/(Math.log(1+b.m)-Math.log(1+a.m))/100; });
-  let jMax = 1; for (let j=1;j<pts.length-1;j++) if (pts[j].gamma>pts[jMax].gamma) jMax=j;
-  let vw=0, ww=0; for (const L of legs) if (L.kind==='cb' && L.iv){ const wt=L.perPt*L.par; vw+=wt*L.iv; ww+=wt; }
-  return {pts, j0, jMax, iv:ww?vw/ww:25, s};
+  // benchmark composite: same model on every constituent, units held proportional to index weight / price
+  const bLegs = S.files.B1.list.filter(i=>i.w && i.P && i.par!=null && i.delta!=null).map(i=>cbLeg(i, i.w/i.P));
+  return {...profile(legs, s.aum), bench:bLegs.length ? profile(bLegs, 1) : null, s};
 }
 function lineChart(box, o){
   box.innerHTML=''; const W=Math.max(320, box.clientWidth||520), H=o.h||280, pl=46, pr=12, pt=12, pb=34;
   const xs=o.x, ys=o.series.flatMap(s=>s.y).concat(o.extraY||[]).filter(v=>v!=null&&isFinite(v));
-  const xa=xs.concat(o.extraX||[]), x0=Math.min(...xa), x1=Math.max(...xa); let y0=Math.min(...ys), y1=Math.max(...ys); const py=(y1-y0)*0.06||1; y0-=py; y1+=py;
+  const xa=xs.concat(o.extraX||[], ...o.series.map(s=>s.x||[])), x0=Math.min(...xa), x1=Math.max(...xa); let y0=Math.min(...ys), y1=Math.max(...ys); const py=(y1-y0)*0.06||1; y0-=py; y1+=py;
   const X=v=>pl+(v-x0)/(x1-x0)*(W-pl-pr), Y=v=>pt+(y1-v)/(y1-y0)*(H-pt-pb);
   const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,role:'img','aria-label':o.label});
   const cross=svgEl('line',{x1:0,x2:0,y1:pt,y2:H-pb,class:'conn',visibility:'hidden'});
@@ -831,7 +877,7 @@ function lineChart(box, o){
   svg.appendChild(svgEl('line',{x1:pl,x2:W-pr,y1:H-pb,y2:H-pb,class:'zero'}));
   if (o.xlabel) svg.appendChild(svgEl('text',{x:W-pr,y:H-4,'text-anchor':'end'},o.xlabel));
   for (const b of o.bubbles||[]){ const c=svgEl('circle',{cx:X(b.x),cy:Y(b.y),r:b.r,class:'bub'}); if (b.color){ c.style.fill=b.color; c.style.stroke=b.color; } c.addEventListener('mousemove',ev=>{ ev.stopPropagation(); cross.setAttribute('visibility','hidden'); showTip(ev,b.tip); }); svg.appendChild(c); }
-  for (const s of o.series){ const d=s.y.map((v,j)=>v==null?'':`${j&&s.y[j-1]!=null?'L':'M'}${X(xs[j]).toFixed(1)},${Y(v).toFixed(1)}`).join(''); svg.appendChild(svgEl('path',{d,class:'ln '+s.cls})); }
+  for (const s of o.series){ const sx=s.x||xs, d=s.y.map((v,j)=>v==null?'':`${j&&s.y[j-1]!=null?'L':'M'}${X(sx[j]).toFixed(1)},${Y(v).toFixed(1)}`).join(''); svg.appendChild(svgEl('path',{d,class:'ln '+s.cls})); }
   for (const mk of o.markers||[]){ svg.appendChild(svgEl('circle',{cx:X(mk.x),cy:Y(mk.y),r:4.5,class:'mk '+(mk.cls||'')})); svg.appendChild(svgEl('text',{x:X(mk.x)+(mk.dx||8),y:Y(mk.y)+(mk.dy||-8),'text-anchor':mk.anchor||'start',class:'lab'},mk.label)); }
   svg.appendChild(cross);
   svg.addEventListener('mousemove',ev=>{ const r=svg.getBoundingClientRect(), vx=(ev.clientX-r.left)/r.width*W; let j=0, best=Infinity; xs.forEach((v,i)=>{ const dd=Math.abs(X(v)-vx); if(dd<best){best=dd;j=i;} }); cross.setAttribute('x1',X(xs[j])); cross.setAttribute('x2',X(xs[j])); cross.setAttribute('visibility','visible'); showTip(ev,o.tip(j)); });
@@ -842,20 +888,22 @@ function lineChart(box, o){
 const STRAT_COLORS = ['#5b9bd5','#5cb77c','#b07ee0','#e06c8c','#3fb8b0','#8f9bb3','#c9a227','#7f8fe0'];
 function renderConvexity(){
   if (!S.res) return;
-  const C = convexity(), P = C.pts, p0 = P[C.j0], pM = P[C.jMax], s = C.s;
+  const C = convexity(), P = C.pts, p0 = P[C.j0], pM = P[C.jMax], s = C.s, BP = C.bench, b0 = BP && BP.pts[BP.j0], bM = BP && BP.pts[BP.jMax];
   const h = num($('#cvxHorizon').value)||21, sig = C.iv/100*Math.sqrt(h/252);
   const at = m => { const j = Math.round((Math.min(1,Math.max(-0.5,m))+0.5)/0.01); return P[j]; };
   const up = at(0.2), dn = at(-0.2);
   const partUp = (up.price-p0.price)/(up.parity-p0.parity)*100, partDn = (dn.price-p0.price)/(dn.parity-p0.parity)*100;
+  const bAt = m => BP.pts[Math.round((m+0.5)/0.01)];
+  const bPart = BP ? `${fmtN((bAt(0.2).price-b0.price)/(bAt(0.2).parity-b0.parity)*100,0)} / ${fmtN((bAt(-0.2).price-b0.price)/(bAt(-0.2).parity-b0.parity)*100,0)}` : '';
   const zone = p0.delta<30 ? 'bond-like' : p0.delta>75 ? 'equity-like' : 'balanced';
   const tile = (k,v,sub,cls='') => `<div class="tile ${cls}"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${sub}</span></div>`;
   $('#cvxTiles').innerHTML =
-    tile('Composite delta', fmtN(p0.delta,1)+'%', zone+' zone', 'hero') +
-    tile('Max convexity at', fmtS(pM.m*100,0)+'%', `equity move · δ ${fmtN(pM.delta,0)}% · parity ${fmtN(pM.parity,1)}`) +
+    tile('Composite delta', fmtN(p0.delta,1)+'%', zone+' zone'+(BP?` · benchmark ${fmtN(b0.delta,1)}%`:''), 'hero') +
+    tile('Max convexity at', fmtS(pM.m*100,0)+'%', `equity move · δ ${fmtN(pM.delta,0)}% · parity ${fmtN(pM.parity,1)}`+(BP?` · benchmark ${fmtS(bM.m*100,0)}%`:'')) +
     tile('Gamma now / max', fmtN(p0.gamma/pM.gamma*100,0)+'%', `${fmtN(p0.gamma,2)} vs ${fmtN(pM.gamma,2)} δ pts per 1%`) +
-    tile('Conversion premium', fmtN((p0.price/p0.parity-1)*100,1)+'%', `price ${fmtN(p0.price,2)} · parity ${fmtN(p0.parity,2)}`) +
+    tile('Conversion premium', fmtN((p0.price/p0.parity-1)*100,1)+'%', `price ${fmtN(p0.price,2)} · parity ${fmtN(p0.parity,2)}`+(BP?` · benchmark ${fmtN((b0.price/b0.parity-1)*100,1)}%`:'')) +
     tile('Premium over floor', fmtN((p0.price/p0.floor-1)*100,1)+'%', `floor ${fmtN(p0.floor,2)}`) +
-    tile('Participation ±20%', `${fmtN(partUp,0)} / ${fmtN(partDn,0)}`, 'up / down, % of parity move');
+    tile('Participation ±20%', `${fmtN(partUp,0)} / ${fmtN(partDn,0)}`, 'up / down, % of parity move'+(BP?` · benchmark ${bPart}`:''));
   $('#cvxNote').textContent = `Composite of ${s.rows.length} CBs, in points per 100 nominal (MV-weighted). Shaded: ±1σ equity move over ${h} trading days at the composite implied vol of ${fmtN(C.iv,1)}% (±${fmtN(sig*100,1)}%).`;
   const band = [Math.exp(-sig)-1, Math.exp(sig)-1];
   const pos = s.rows.map(r=>({r, x:r.ix&&r.ix.par!=null?r.ix.par:r.par, y:r.ix&&r.ix.P!=null?r.ix.P:(r.perPt?r.mv/r.perPt:null)})).filter(b=>b.x!=null&&b.y!=null&&b.r.mv>0);
@@ -867,14 +915,14 @@ function renderConvexity(){
   const bubbles = pos.map(({r,x,y})=>({x, y, r:3+11*Math.sqrt(Math.max(r.mv,0)/mvMax), color:colorOf(r.strat),
     tip:`<b>${esc(r.name)}</b><div class="num"><span class="muted">MV</span><span>${fmtEUR(r.mv)} € · ${fmtN(pA(r.mv,s.aum),2)}%</span></div><div class="num"><span class="muted">Price</span><span>${fmtN(y,2)}</span></div><div class="num"><span class="muted">Parity</span><span>${fmtN(x,2)}</span></div><div class="num"><span class="muted">Premium</span><span>${fmtN((y/x-1)*100,1)}%</span></div><div class="num"><span class="muted">Delta</span><span>${fmtN(r.delta,1)}%</span></div><div class="muted small" style="margin-top:4px">${esc(r.strat)} · ${esc(r.ccy)}</div>`}));
   lineChart($('#chCvxPrice'), {label:'Composite price vs parity', x:P.map(p=>p.parity), xfmt:v=>fmtN(v,0), xlabel:'composite parity',
-    series:[{y:P.map(p=>p.price),cls:'a'},{y:P.map(p=>p.parity),cls:'ref'},{y:P.map(p=>p.floor),cls:'ref'}],
+    series:[{y:P.map(p=>p.price),cls:'a'},{y:P.map(p=>p.parity),cls:'ref'},{y:P.map(p=>p.floor),cls:'ref'}].concat(BP?[{x:BP.pts.map(p=>p.parity),y:BP.pts.map(p=>p.price),cls:'bm'}]:[]),
     band:[at(band[0]).parity, at(band[1]).parity], bubbles, extraX:pos.map(b=>b.x), extraY:pos.map(b=>b.y),
-    markers:[{x:p0.parity,y:p0.price,label:'today',cls:'now',dx:-8,anchor:'end'},{x:pM.parity,y:pM.price,label:'max convexity',cls:'max',dy:16}],
+    markers:[{x:p0.parity,y:p0.price,label:'today',cls:'now',dx:-8,anchor:'end'},{x:pM.parity,y:pM.price,label:'max convexity',cls:'max',dy:16}].concat(BP?[{x:b0.parity,y:b0.price,label:'benchmark',cls:'bmk',dx:-8,dy:18,anchor:'end'}]:[]),
     tip:j=>{ const p=P[j]; return `<b>Equity ${fmtS(p.m*100,0)}%</b><div class="num"><span class="muted">Price</span><span>${fmtN(p.price,2)}</span></div><div class="num"><span class="muted">Parity</span><span>${fmtN(p.parity,2)}</span></div><div class="num"><span class="muted">Floor</span><span>${fmtN(p.floor,2)}</span></div><div class="num"><span class="muted">Premium</span><span>${fmtN((p.price/p.parity-1)*100,1)}%</span></div><div class="num"><span class="muted">Delta</span><span>${fmtN(p.delta,1)}%</span></div>`; }});
   lineChart($('#chCvxDelta'), {label:'Delta vs equity move', x:P.map(p=>p.m*100), xfmt:v=>fmtS(v,0)+'%', xlabel:'equity move', extraY:[0],
-    series:[{y:P.map(p=>p.delta),cls:'a'},{y:P.map(p=>p.net),cls:'b'}], band:band.map(v=>v*100),
+    series:[{y:P.map(p=>p.delta),cls:'a'},{y:P.map(p=>p.net),cls:'b'}].concat(BP?[{y:BP.pts.map(p=>p.delta),cls:'bm'}]:[]), band:band.map(v=>v*100),
     markers:[{x:0,y:p0.delta,label:fmtN(p0.delta,0)+'%',cls:'now'},{x:pM.m*100,y:pM.delta,label:'max γ',cls:'max',dy:16},{x:0,y:p0.net,label:fmtN(p0.net,1)+'%',cls:'now',dy:16}],
-    tip:j=>{ const p=P[j]; return `<b>Equity ${fmtS(p.m*100,0)}%</b><div class="num"><span class="muted">Composite δ</span><span>${fmtN(p.delta,1)}%</span></div><div class="num"><span class="muted">Gamma</span><span>${fmtN(p.gamma,2)}</span></div><div class="num"><span class="muted">Net delta, % AUM</span><span>${fmtN(p.net,1)}%</span></div>`; }});
+    tip:j=>{ const p=P[j]; return `<b>Equity ${fmtS(p.m*100,0)}%</b><div class="num"><span class="muted">Composite δ</span><span>${fmtN(p.delta,1)}%</span></div>${BP?`<div class="num"><span class="muted">Benchmark δ</span><span>${fmtN(BP.pts[j].delta,1)}%</span></div>`:''}<div class="num"><span class="muted">Gamma</span><span>${fmtN(p.gamma,2)}</span></div><div class="num"><span class="muted">Net delta, % AUM</span><span>${fmtN(p.net,1)}%</span></div>`; }});
   const sc = [[-0.3],[-0.2],[-0.1],[band[0],'−1σ'],[0],[band[1],'+1σ'],[0.1],[0.2],[0.3]];
   $('#tblCvx').innerHTML = `<table><thead><tr><th class="l">Equity move</th><th>Composite price</th><th>Composite δ</th><th>CB P&amp;L €</th><th>of which convexity €</th><th>Overlay P&amp;L €</th><th>Total bps</th><th>Net delta % AUM</th><th>Chg pp</th></tr></thead><tbody>${sc.map(([m,l])=>{
     const p=at(m), cb=p.V-p0.V, lin=p0.cbEq*p.m, tot=cb+p.ovPnl;
@@ -1040,15 +1088,70 @@ function renderOverlay(){
   <tr class="tot"><td class="l">Total overlay</td><td colspan="12"></td><td class="num">${fmtS(R.ovlTot,0)}</td><td class="num">${fmtS(bps(R.ovlTot),1)}</td><td></td></tr></tbody></table>`;
   box.querySelectorAll('input.tdin').forEach(i=>i.addEventListener('change',()=>{ const o=S.overlayS[i.dataset.key]||(S.overlayS[i.dataset.key]={}); o[i.dataset.f]=num(i.value); i.blur(); setTimeout(run,0); }));
 }
+function benchData(){
+  const R = S.res, B = R.bench, B1 = S.files.B1, s1 = R.expo.s1;
+  const held = R.rows.filter(r=>r.p0), mv0 = held.reduce((a,r)=>a+r.p0.expo,0) || 1;
+  const pRet = held.reduce((a,r)=>a+r.eur.total-r.eur.basis,0)/mv0, pRetB = held.reduce((a,r)=>a+r.eur.total,0)/mv0;
+  const bRet = B.bonds.reduce((a,b)=>a+b.w*b.r,0);
+  // active weights at T1, per benchmark line (MACE ID) so RegS/144A lines collapse together
+  const w1sum = B1.list.reduce((a,b)=>a+(b.w||0),0) || 100, mv1 = s1.tot.mv || 1, act = {};
+  for (const b of B1.list) if (b.w) act[b.mace] = {name:b.name, region:b.region, wb:b.w/w1sum*100, wp:0};
+  for (const r of s1.rows){ const b = B1.byIsin[r.isin], k = b ? b.mace : r.isin; const a = act[k] || (act[k] = {name:r.name, region:r.region, wb:0, wp:0}); a.wp += r.mv/mv1*100; if (b) a.inBench = true; }
+  const lines = Object.values(act); for (const a of lines) a.aw = a.wp - a.wb;
+  const activeShare = lines.reduce((x,a)=>x+Math.abs(a.aw),0)/2;
+  const inB = s1.rows.filter(r=>B1.byIsin[r.isin]), overlapMv = inB.reduce((a,r)=>a+r.mv,0)/mv1*100;
+  return {held, mv0, pRet, pRetB, bRet, lines, activeShare, inB, overlapMv};
+}
+function wavg(items, wf, vf){ let w=0, v=0; for (const it of items){ const x=vf(it), ww=wf(it); if (x!=null && isFinite(x) && ww){ w+=ww; v+=ww*x; } } return w ? v/w : null; }
+const CHAR = [
+  ['Delta, %', r=>r.delta, 1], ['Gamma, δ pts per 1%', r=>r.gamma, 2], ['Vega, % of price per vol pt', r=>r.vega!=null&&r.P?r.vega/r.P*100:null, 3],
+  ['Rho, % of price per 10 bp', r=>r.rho!=null&&r.P?r.rho/r.P*100:null, 3], ['Duration', r=>r.dur, 2], ['Conversion premium, %', r=>r.prem!=null?r.prem:(r.par?(r.P/r.par-1)*100:null), 1],
+  ['Premium to inv. value, %', r=>r.pinv!=null?r.pinv:(r.inv?(r.P/r.inv-1)*100:null), 1], ['Yield, %', r=>r.ytm, 2], ['Credit spread, bp', r=>r.cs, 0], ['Implied vol, %', r=>r.iv, 1], ['Coupon, %', r=>r.cpn, 2]
+];
 function renderBench(){
-  const B=S.res.bench, P=S.res.tot; const expl = k=>B.comps[k];
-  const pf = k => bps(P[k]);
+  const R = S.res, B = R.bench, P = R.tot, D = benchData(), s1 = R.expo.s1, B1 = S.files.B1;
+  const same = S.files.B0 === S.files.I0 || !S.files.B0 || S.files.B0.code === (S.files.I0&&S.files.I0.code);
+  $('#benchName').innerHTML = `Benchmark <b>${esc(B.name)}</b> (UCBINDEX${esc(B.code)}), ${B1.list.length} constituents${same?' · <span class="flag warn">same file as pricing: load the benchmark files to compare against the real benchmark</span>':''}`;
+  const ex = (D.pRet - D.bRet)*1e4;
+  const tile = (k,v,sub,cls='') => `<div class="tile ${cls}"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${sub}</span></div>`;
+  const sg = v => `<span class="${v<0?'neg':v>0?'pos':''}">${fmtS(v,1)}</span>`;
+  $('#benchTiles').innerHTML =
+    tile('Excess return', sg(ex)+' bps', 'portfolio CBs vs benchmark, on index prices', 'hero') +
+    tile('Portfolio CBs', sg(D.pRet*1e4)+' bps', `${fmtS(D.pRetB*1e4,1)} bps incl. pricing basis`) +
+    tile('Benchmark', sg(D.bRet*1e4)+' bps', `${B.n} bonds${B.dropped?`, ${B.dropped} dropped`:''}`) +
+    tile('Active share', fmtN(D.activeShare,1)+'%', '½ Σ |w<sub>p</sub> − w<sub>b</sub>| per line') +
+    tile('Overlap', fmtN(D.overlapMv,1)+'%', `of CB MV in the benchmark · ${D.inB.length}/${s1.rows.length} bonds`);
+  // characteristics
+  const pRows = s1.rows.filter(r=>r.ix).map(r=>({...r.ix, wt:r.mv}));
+  const bRows = B1.list.filter(b=>b.w).map(b=>({...b, wt:b.w}));
+  $('#tblBenchChar').innerHTML = `<table><thead><tr><th class="l">MV-weighted</th><th>Portfolio</th><th>Benchmark</th><th>Difference</th></tr></thead><tbody>${CHAR.map(([l,f,d])=>{ const a=wavg(pRows,r=>r.wt,f), b=wavg(bRows,r=>r.wt,f); return `<tr><td class="l">${l}</td><td class="num">${fmtN(a,d)}</td><td class="num">${fmtN(b,d)}</td><td class="num">${a!=null&&b!=null?fmtS(a-b,d):'—'}</td></tr>`; }).join('')}
+    <tr><td class="l">Number of issues</td><td class="num">${s1.rows.length}</td><td class="num">${B1.list.length}</td><td></td></tr></tbody></table>`;
+  renderBrinson(D);
+  // over/underweights
+  const ow = [...D.lines].sort((a,b)=>b.aw-a.aw), aw = (list) => `<table><thead><tr><th class="l">Bond</th><th class="l">Region</th><th>Portfolio %</th><th>Benchmark %</th><th>Active pp</th></tr></thead><tbody>${list.map(a=>`<tr><td class="l">${esc(a.name)}${a.wp&&!a.wb?' <span class="flag">off-benchmark</span>':''}</td><td class="l">${esc(a.region||'—')}</td><td class="num">${fmtN(a.wp,2)}</td><td class="num">${fmtN(a.wb,2)}</td><td class="num ${a.aw<0?'neg':'pos'}">${fmtS(a.aw,2)}</td></tr>`).join('')}</tbody></table>`;
+  $('#tblOver').innerHTML = aw(ow.slice(0,10)); $('#tblUnder').innerHTML = aw(ow.slice(-10).reverse());
+  // decomposition
+  const comps = COMPS.filter(([k])=>k!=='basis'), pf = k => P[k]/D.mv0*1e4;
   const rowsR = Object.entries(B.byRegion).sort((a,b)=>b[1].w-a[1].w);
-  $('#tblBench').innerHTML = `<table><thead><tr><th class="l">Line</th><th>Weight %</th>${COMPS.filter(([k])=>k!=='basis').map(([k,l])=>`<th>${l}</th>`).join('')}<th>Total bps</th></tr></thead><tbody>
-    <tr class="tot"><td class="l">Index (all constituents, ${B.n} matched${B.dropped?`, ${B.dropped} dropped`:''})</td><td class="num">100</td>${COMPS.filter(([k])=>k!=='basis').map(([k])=>`<td class="num">${fmtS(expl(k),1)}</td>`).join('')}<td class="num ${B.total<0?'neg':'pos'}">${fmtS(B.total,1)}</td></tr>
-    ${rowsR.map(([k,R])=>`<tr><td class="l">${esc(k)}</td><td class="num">${fmtN(R.w,1)}</td>${COMPS.filter(([c])=>c!=='basis').map(([c])=>`<td class="num">${fmtS(R.comps[c],1)}</td>`).join('')}<td class="num">${fmtS(R.total,1)}</td></tr>`).join('')}
-    <tr class="tot"><td class="l">Portfolio (convertibles only, for comparison)</td><td class="num">—</td>${COMPS.filter(([k])=>k!=='basis').map(([k])=>`<td class="num">${fmtS(pf(k),1)}</td>`).join('')}<td class="num ${P.total<0?'neg':'pos'}">${fmtS(pf('total')-pf('basis'),1)}</td></tr>
-  </tbody></table><p class="muted small" style="margin-top:6px">Index lines are contributions in bps of the index; portfolio line excludes pricing basis so both rest on index prices. Region weights from the index file.</p>`;
+  $('#tblBench').innerHTML = `<table><thead><tr><th class="l">Line</th><th>Weight %</th>${comps.map(([k,l])=>`<th>${l}</th>`).join('')}<th>Total bps</th></tr></thead><tbody>
+    <tr class="tot"><td class="l">Benchmark (${B.n} bonds)</td><td class="num">100</td>${comps.map(([k])=>`<td class="num">${fmtS(B.comps[k],1)}</td>`).join('')}<td class="num ${B.total<0?'neg':'pos'}">${fmtS(B.total,1)}</td></tr>
+    ${rowsR.map(([k,G])=>`<tr><td class="l">${esc(k)}</td><td class="num">${fmtN(G.w,1)}</td>${comps.map(([c])=>`<td class="num">${fmtS(G.comps[c],1)}</td>`).join('')}<td class="num">${fmtS(G.total,1)}</td></tr>`).join('')}
+    <tr class="tot"><td class="l">Portfolio CBs, bps of CB MV</td><td class="num">—</td>${comps.map(([k])=>`<td class="num">${fmtS(pf(k),1)}</td>`).join('')}<td class="num ${D.pRet<0?'neg':'pos'}">${fmtS(D.pRet*1e4,1)}</td></tr>
+    <tr><td class="l">Difference</td><td class="num">—</td>${comps.map(([k])=>`<td class="num">${fmtS(pf(k)-B.comps[k],1)}</td>`).join('')}<td class="num">${fmtS(ex,1)}</td></tr>
+  </tbody></table><p class="muted small" style="margin-top:6px">Benchmark lines are contributions in bps of the benchmark; region weights from the benchmark file.</p>`;
+}
+function renderBrinson(D){
+  D = D || benchData(); const key = $('#benchGroup').value, B = S.res.bench, g = {};
+  const G = k => g[k] || (g[k] = {k, wp:0, pnl:0, wb:0, rb:0});
+  for (const r of D.held){ const x = G(r[key]||'n/a'); x.wp += r.p0.expo/D.mv0; x.pnl += r.eur.total - r.eur.basis; }
+  for (const b of B.bonds){ const x = G(b.rec[key]||'n/a'); x.wb += b.w; x.rb += b.w*b.r; }
+  const list = Object.values(g); let tA=0, tS=0;
+  for (const x of list){ x.Rp = x.wp ? x.pnl/(x.wp*D.mv0) : 0; x.Rb = x.wb ? x.rb/x.wb : D.bRet; x.alloc = (x.wp-x.wb)*(x.Rb-D.bRet)*1e4; x.sel = x.wp*(x.Rp-x.Rb)*1e4; tA+=x.alloc; tS+=x.sel; }
+  list.sort((a,b)=>Math.abs(b.alloc+b.sel)-Math.abs(a.alloc+a.sel));
+  const c = v => `<td class="num ${v<0?'neg':v>0?'pos':''}">${fmtS(v,1)}</td>`;
+  $('#tblBrinson').innerHTML = `<table><thead><tr><th class="l">${key==='region'?'Region':'Sector'}</th><th>Port. wt %</th><th>Bench wt %</th><th>Port. ret bps</th><th>Bench ret bps</th><th>Allocation</th><th>Selection</th><th>Total</th></tr></thead><tbody>
+    ${list.map(x=>`<tr><td class="l">${esc(x.k)}</td><td class="num">${fmtN(x.wp*100,1)}</td><td class="num">${fmtN(x.wb*100,1)}</td><td class="num">${x.wp?fmtS(x.Rp*1e4,1):'—'}</td><td class="num">${x.wb?fmtS(x.Rb*1e4,1):'—'}</td>${c(x.alloc)}${c(x.sel)}${c(x.alloc+x.sel)}</tr>`).join('')}
+    <tr class="tot"><td class="l">Total</td><td class="num">100</td><td class="num">100</td><td class="num">${fmtS(D.pRet*1e4,1)}</td><td class="num">${fmtS(D.bRet*1e4,1)}</td>${c(tA)}${c(tS)}${c(tA+tS)}</tr></tbody></table>`;
 }
 function renderChecks(){
   const R=S.res; const items=[];
@@ -1085,6 +1188,7 @@ $('#btnCopy').addEventListener('click',async()=>{ if(!S.res) return; const t=csv
 $('#unit').addEventListener('change',e=>{ S.unit=e.target.value; renderBonds(); });
 $('#expoGroup').value = load('cbpnl.expoGroup','strat');
 $('#cvxHorizon').addEventListener('change',()=>renderConvexity());
+$('#benchGroup').addEventListener('change',()=>{ if (S.res) renderBrinson(); });
 $('#expoGroup').addEventListener('change',e=>{ store('cbpnl.expoGroup',e.target.value); if (S.res) renderExpoGroup(); });
 $('#btnExpoCsv').addEventListener('click',()=>{ if(!S.res) return; const b=new Blob([expoCsv()],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`cb_exposures_${fmtDate(S.files.E1.date).replace(/ /g,'')}.csv`; document.body.appendChild(a); a.click(); a.remove(); });
 
@@ -1101,22 +1205,28 @@ let rt; addEventListener('resize',()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if
 
 /* ===================== sample data (fictitious) ===================== */
 function demo(){
-  const mk = (isin,name,ccy,cpn,P0,P1,S0,S1,par0,par1,d0,d1,cs0,cs1,iv0,iv1,gam,rho,vega,region,sector,w) => ({
-    i0:{isin,name,ccy,cpn,P:P0,S:S0,par:par0,delta:d0,cs:cs0,iv:iv0,gamma:gam,rho,vega,region,sector,w,inv:80,dur:4},
-    i1:{isin,name,ccy,cpn,P:P1,S:S1,par:par1,delta:d1,cs:cs1,iv:iv1,gamma:gam,rho,vega,region,sector,w,inv:80,dur:4}});
+  let mace = 1000;
+  const mk = (isin,name,ccy,cpn,P0,P1,S0,S1,par0,par1,d0,d1,cs0,cs1,iv0,iv1,gam,rho,vega,region,sector,w) => { mace++; return {
+    i0:{mace,isin,name,ccy,cpn,P:P0,S:S0,par:par0,delta:d0,cs:cs0,iv:iv0,gamma:gam,rho,vega,region,sector,w,inv:80,dur:4,ytm:1.2,prem:(P0/par0-1)*100,pinv:(P0/80-1)*100},
+    i1:{mace,isin,name,ccy,cpn,P:P1,S:S1,par:par1,delta:d1,cs:cs1,iv:iv1,gamma:gam,rho,vega,region,sector,w,inv:80,dur:4,ytm:1.2,prem:(P1/par1-1)*100,pinv:(P1/80-1)*100}}; };
   const bonds=[
     mk('XS0000000001','Sample Semicap 0.5% 2031','EUR',0.5,98.4,100.1,41.2,42.6,61.0,63.1,58,60,150,150,38,38.6,0.45,-0.30,0.42,'Europe','Electronics',0.15),
     mk('US000000AA01','Sample Cloud 0.25% 2030','USD',0.25,91.2,90.1,118.3,116.9,52.4,51.8,42,41,220,220,45,44.2,0.38,-0.25,0.36,'US','Software',0.22),
     mk('XS0000000003','Sample Insurer 0% 2030','HKD',0,104.1,104.6,58.9,59.3,95.1,95.7,62,62.5,140,140,30,30,0.35,-0.20,0.30,'Asia','Financials',0.10),
     mk('XS0000000004','Sample Steel 0% 2031','JPY',0,107.3,106.2,3410,3362,92.8,91.5,55,54,60,60,27,27.5,0.40,-0.22,0.33,'Japan','Materials',0.12),
-    mk('FR0000000005','Sample Utility 1.5% 2033','EUR',1.5,105.9,106.4,101.2,101.9,79.1,79.6,60,60.4,75,75,24,23.5,0.36,-0.33,0.29,'Europe','Utilities',0.18)];
+    mk('FR0000000005','Sample Utility 1.5% 2033','EUR',1.5,105.9,106.4,101.2,101.9,79.1,79.6,60,60.4,75,75,24,23.5,0.36,-0.33,0.29,'Europe','Utilities',0.18),
+    mk('US000000BB06','Sample Biotech 1% 2029','USD',1,96.5,97.8,22.4,23.1,48.0,49.5,40,42,260,255,48,47.5,0.50,-0.20,0.33,'US','Healthcare',0.13),
+    mk('XS0000000007','Sample Auto 0% 2028','EUR',0,99.2,98.7,15.6,15.3,70.1,68.8,52,50,110,112,32,32.4,0.62,-0.15,0.22,'Europe','Autos',0.10)];
+  const benchW = {XS0000000001:6, US000000AA01:22, XS0000000003:8, XS0000000004:4, FR0000000005:10, US000000BB06:30, XS0000000007:20};
   const E=(date,k)=>({kind:'expo',title:'Sample book',date,fx:{'EUR/USD':k?1.1144:1.1177,'EUR/JPY':k?175.95:176.16,'EUR/HKD':k?8.743:8.770},aum:80e6,cbs:{},overlay:[{name:'LISTED xSPX 6700 EC 17th Dec 27',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Option',expo:k?12.28e6:12.06e6,delta:k?0.8435:0.8359,px:k?1507.39:1464.86,iv:k?0.168:0.171,country:'United States of America'},{name:'Fut S&P 500 Index DEC26',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Future',expo:k?-1.7467e6:-1.7308e6,delta:1,px:k?7763:7715.75,country:'United States of America'}],fname:'sample_exposure_'+(k?'T1':'T0')+'.xlsx'});
   const E0=E(new Date(Date.UTC(2026,9,27)),0), E1=E(new Date(Date.UTC(2026,9,28)),1);
   const nom={XS0000000001:1.5e6,US000000AA01:2e6,XS0000000003:16e6,XS0000000004:300e6,FR0000000005:2.5e6};
   const strat={EUR:'CB3. DELTA EUROPE',USD:'CB2. DELTA USA',HKD:'CB4. DELTA ASIA',JPY:'CB4. DELTA ASIA'};
-  for (const b of bonds){ for (const [Ex,i,k] of [[E0,b.i0,0],[E1,b.i1,1]]){ const acc=(i.cpn||0)*(k?120:119)/365; const dirty=(i.P+(k?0.03:0)-(k?0.02:0))+acc; const fx=Ex.fx['EUR/'+i.ccy]||1; Ex.cbs[i.isin]={isin:i.isin,name:i.name,strat:strat[i.ccy],book:'SAMPLE',bics:i.sector,country:i.region,expo:nom[i.isin]/fx*dirty/100,pct:dirty/100,px:i.P,delta:i.delta/100,iv:i.iv/100,parity:i.par,cs:i.cs,dur:4}; } }
-  const I=(date,k)=>{ const list=bonds.map(b=>k?b.i1:b.i0); const byIsin={}; for (const r of list) byIsin[r.isin]=r; return {kind:'index',date,byIsin,list,fname:'sample_index_'+(k?'T1':'T0')+'.xls'}; };
-  S.parsed=[E0,E1,I(new Date(Date.UTC(2026,9,27)),0),I(new Date(Date.UTC(2026,9,28)),1)];
+  for (const b of bonds){ if (!nom[b.i0.isin]) continue; for (const [Ex,i,k] of [[E0,b.i0,0],[E1,b.i1,1]]){ const acc=(i.cpn||0)*(k?120:119)/365; const dirty=(i.P+(k?0.03:0)-(k?0.02:0))+acc; const fx=Ex.fx['EUR/'+i.ccy]||1; Ex.cbs[i.isin]={isin:i.isin,name:i.name,strat:strat[i.ccy],book:'SAMPLE',bics:i.sector,country:i.region,expo:nom[i.isin]/fx*dirty/100,pct:dirty/100,px:i.P,delta:i.delta/100,iv:i.iv/100,parity:i.par,cs:i.cs,dur:4}; } }
+  const I=(date,k,code)=>{ const bm = code==='0204'; const list=bonds.map(b=>({...(k?b.i1:b.i0), w: bm ? benchW[b.i0.isin] : (k?b.i1:b.i0).w/0.01})); const byIsin={}; for (const r of list) byIsin[r.isin]=r;
+    return {kind:'index',date,byIsin,list,code,iname:bm?'Sample Focus Index':'Sample Global Index',fname:`sample_${code}_${k?'T1':'T0'}.xls`}; };
+  const d0 = new Date(Date.UTC(2026,9,27)), d1 = new Date(Date.UTC(2026,9,28));
+  S.parsed=[E0,E1,I(d0,0,'0001'),I(d1,1,'0001'),I(d0,0,'0204'),I(d1,1,'0204')];
   assignSlots(); toast('Sample data: five fictitious bonds, not a real book');
 }
 $('#btnDemo').addEventListener('click',demo);
