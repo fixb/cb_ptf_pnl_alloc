@@ -235,7 +235,7 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
           <div class="tblwrap" id="tblExpoGroup" style="margin-top:16px"></div>
           <h3 style="margin-top:16px">Positions</h3>
           <div class="tblwrap" id="tblExpoPos" style="margin-top:6px"></div>
-          <p class="muted small" style="margin-top:6px">Equity delta = δ × parity × nominal, in EUR. Gamma = change in equity delta for a +1% stock move. Vega per vol point, CS01 per +1 bp of spread (index Rho). Greeks from the index file at each date; bonds missing from the index fall back to BgAM delta and parity (no gamma/vega/CS01). Index options and futures enter at their delta-adjusted exposure.</p>
+          <p class="muted small" style="margin-top:6px">Equity delta = δ × parity × nominal, in EUR. Gamma = change in equity delta for a +1% stock move. Vega per vol point, CS01 per +1 bp of spread (index Rho). DV01 = −MV × duration × 1 bp, per +1 bp of rates, duration from the index file (BgAM if missing). Theta per calendar day = gamma decay −½ × IV² × parity × Γ / 365 (the breakeven of the gamma term used in the attribution) + coupon accrual; an estimate, not the pricing model's theta. Greeks from the index file at each date; bonds missing from the index fall back to BgAM delta and parity (no gamma/vega/CS01). Index options and futures enter at their delta-adjusted exposure.</p>
         </div>
         <div class="view" id="view-strategy" hidden style="padding-top:12px"><div class="tblwrap" id="tblStrategy"></div></div>
         <div class="view" id="view-region" hidden style="padding-top:12px"><div class="tblwrap" id="tblRegion"></div></div>
@@ -593,15 +593,22 @@ function expoSnap(E, I, aumAlt){
       gamma: i&&i.gamma!=null&&par!=null ? perPt*par*i.gamma/100 : null,
       vega: i&&i.vega!=null ? perPt*i.vega : null,
       cs01: i&&i.rho!=null ? perPt*i.rho/10 : null,
+      // gamma rent: -½·σ²·parity·Γ per year, the breakeven of the model gamma term ½·Γ·parity·r²
+      decay: i&&i.gamma!=null&&i.iv!=null&&par!=null ? -perPt*0.5*(i.iv/100)**2*par*i.gamma/365 : null,
+      carry: i&&i.cpn!=null ? perPt*i.cpn/365 : null,
+      dur: i&&i.dur!=null ? i.dur : p.dur,
       cs: i&&i.cs!=null ? i.cs : p.cs, iv: i&&i.iv!=null ? i.iv : (p.iv!=null ? p.iv*100 : null)};
+    r.theta = r.decay==null&&r.carry==null ? null : (r.decay||0)+(r.carry||0);
+    r.dv01 = r.dur!=null ? -r.mv*r.dur*1e-4 : null;
     rows.push(r);
     if (p.country && r.region!=='n/a') regionOf[norm(p.country)] = r.region;
   }
   const ovl = E.overlay.map(o=>({name:o.name, und:String(o.und||'—'), strat:o.strat||'—', ccy:ccyOfOverlay(o), region:regionOf[norm(o.country)]||'n/a', sector:'Index overlay', eq:o.expo, kind:o.kind}));
-  const tot = {mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0};
-  for (const r of rows){ tot.mv+=r.mv; tot.eq+=r.eq; tot.gamma+=r.gamma||0; tot.vega+=r.vega||0; tot.cs01+=r.cs01||0; if (r.delta!=null) tot.dmv+=r.delta*r.mv; }
+  const tot = {mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0, decay:0, carry:0, theta:0, dv01:0, durMv:0, mvDur:0};
+  for (const r of rows){ tot.mv+=r.mv; tot.eq+=r.eq; tot.gamma+=r.gamma||0; tot.vega+=r.vega||0; tot.cs01+=r.cs01||0; if (r.delta!=null) tot.dmv+=r.delta*r.mv;
+    tot.decay+=r.decay||0; tot.carry+=r.carry||0; tot.theta+=r.theta||0; tot.dv01+=r.dv01||0; if (r.dur!=null){ tot.durMv+=r.dur*r.mv; tot.mvDur+=r.mv; } }
   for (const o of ovl) tot.ovl+=o.eq;
-  tot.net = tot.eq + tot.ovl; tot.avgDelta = tot.mv ? tot.dmv/tot.mv : null;
+  tot.net = tot.eq + tot.ovl; tot.avgDelta = tot.mv ? tot.dmv/tot.mv : null; tot.avgDur = tot.mvDur ? tot.durMv/tot.mvDur : null;
   const idx = {region:{}, sector:{}, ccy:{}, w:0, dw:0};
   for (const b of I.list){ if (!b.w) continue; idx.w+=b.w; if (b.delta!=null) idx.dw+=b.w*b.delta; for (const k of ['region','sector','ccy']){ const g=b[k]||'n/a'; idx[k][g]=(idx[k][g]||0)+b.w; } }
   idx.avgDelta = idx.w ? idx.dw/idx.w : null;
@@ -610,8 +617,8 @@ function expoSnap(E, I, aumAlt){
 const pA = (v,aum) => v/aum*100;
 function expoGroups(snap, key){
   const g = {};
-  const G = k => g[k] || (g[k] = {k, n:0, mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0});
-  for (const r of snap.rows){ const x=G(r[key]||'—'); x.n++; x.mv+=r.mv; x.eq+=r.eq; x.gamma+=r.gamma||0; x.vega+=r.vega||0; x.cs01+=r.cs01||0; if (r.delta!=null) x.dmv+=r.delta*r.mv; }
+  const G = k => g[k] || (g[k] = {k, n:0, mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0, theta:0, dv01:0});
+  for (const r of snap.rows){ const x=G(r[key]||'—'); x.n++; x.mv+=r.mv; x.eq+=r.eq; x.gamma+=r.gamma||0; x.vega+=r.vega||0; x.cs01+=r.cs01||0; x.theta+=r.theta||0; x.dv01+=r.dv01||0; if (r.delta!=null) x.dmv+=r.delta*r.mv; }
   for (const o of snap.ovl){ const x=G(o[key]||'—'); x.ovl+=o.eq; }
   for (const x of Object.values(g)) x.net = x.eq + x.ovl;
   return g;
@@ -634,7 +641,9 @@ function renderExpo(){
   $('#expoTiles').innerHTML =
     tP('Net equity delta','net','hero') + tP('CB equity delta','eq') + tP('Overlay delta','ovl') + tP('CB market value','mv') +
     `<div class="tile"><span class="k">Avg delta (MV-weighted)</span><span class="v">${fmtN(t1.avgDelta,1)}%</span><span class="s">index ${fmtN(s1.idx.avgDelta,1)}% · ${chg((t1.avgDelta||0)-(t0.avgDelta||0),1,' pp')}</span></div>` +
-    tS('Gamma','gamma','per +1% stocks') + tS('Vega','vega','per vol pt') + tS('CS01','cs01','per +1 bp spread');
+    tS('Gamma','gamma','per +1% stocks') + tS('Vega','vega','per vol pt') + tS('CS01','cs01','per +1 bp spread') +
+    `<div class="tile"><span class="k">Theta</span><span class="v">${fmtS(t1.theta,0)}</span><span class="s">€ per day · decay ${fmtS(t1.decay,0)} · carry ${fmtS(t1.carry,0)} · ${chg(t1.theta-t0.theta,0,' €')}</span></div>` +
+    `<div class="tile"><span class="k">DV01</span><span class="v">${fmtS(t1.dv01,0)}</span><span class="s">€ per +1 bp rates · ${fmtS(bps(t1.dv01),2)} bps · avg duration ${fmtN(t1.avgDur,2)} · ${chg(t1.dv01-t0.dv01,0,' €')}</span></div>`;
   renderExpoLimits(); renderExpoGroup(); renderExpoPos();
 }
 function renderExpoLimits(){
@@ -657,19 +666,19 @@ function renderExpoGroup(){
   const idxW = s1.idx[key], cbMv = s1.tot.mv||1;
   hbars($('#chExpo'), list.slice(0,14).map(x=>({l:x.k, v:pA(x.net,s1.aum),
     tip:`<b>${esc(x.k)}</b><div class="num"><span class="muted">CB delta</span><span>${fmtS(pA(x.eq,s1.aum),2)}%</span></div><div class="num"><span class="muted">Overlay</span><span>${fmtS(pA(x.ovl,s1.aum),2)}%</span></div><div class="num"><span class="muted">Net, EUR</span><span>${fmtS(x.net,0)}</span></div>`})), 'Net equity delta by group');
-  const T = {k:'Total', n:s1.rows.length, mv:s1.tot.mv, eq:s1.tot.eq, ovl:s1.tot.ovl, net:s1.tot.net, gamma:s1.tot.gamma, vega:s1.tot.vega, cs01:s1.tot.cs01, dmv:s1.tot.dmv};
+  const T = {k:'Total', n:s1.rows.length, mv:s1.tot.mv, eq:s1.tot.eq, ovl:s1.tot.ovl, net:s1.tot.net, gamma:s1.tot.gamma, vega:s1.tot.vega, cs01:s1.tot.cs01, dmv:s1.tot.dmv, theta:s1.tot.theta, dv01:s1.tot.dv01};
   const line = (x, x0, cls='') => {
     const d = x0 ? pA(x.net,s1.aum)-pA(x0.net,s0.aum) : (cls ? pA(x.net,s1.aum)-pA(s0.tot.net,s0.aum) : pA(x.net,s1.aum));
     return `<tr class="${cls}"><td class="l">${esc(x.k)}</td><td class="num">${x.n}</td><td class="num">${fmtN(pA(x.mv,s1.aum),2)}</td><td class="num">${fmtN(x.mv/cbMv*100,1)}</td>${idxW?`<td class="num">${cls?'100.0':fmtN(idxW[x.k]!=null?idxW[x.k]/s1.idx.w*100:0,1)}</td>`:''}
       <td class="num">${x.mv?fmtN(x.dmv/x.mv,1):'—'}</td><td class="num">${fmtS(pA(x.eq,s1.aum),2)}</td><td class="num">${fmtS(pA(x.ovl,s1.aum),2)}</td><td class="num ${x.net<0?'neg':'pos'}">${fmtS(pA(x.net,s1.aum),2)}</td><td class="num">${fmtS(d,2)}</td>
-      <td class="num">${fmtS(x.gamma,0)}</td><td class="num">${fmtS(x.vega,0)}</td><td class="num">${fmtS(x.cs01,0)}</td></tr>`;
+      <td class="num">${fmtS(x.gamma,0)}</td><td class="num">${fmtS(x.vega,0)}</td><td class="num">${fmtS(x.cs01,0)}</td><td class="num">${fmtS(x.dv01,0)}</td><td class="num">${fmtS(x.theta,0)}</td></tr>`;
   };
-  $('#tblExpoGroup').innerHTML = `<table><thead><tr><th class="l">${esc(label)}</th><th>#</th><th>MV % AUM</th><th>Wt % CBs</th>${idxW?'<th>Wt % index</th>':''}<th>Avg δ</th><th>CB Δ %</th><th>Overlay Δ %</th><th>Net Δ %</th><th>Chg pp</th><th>Gamma €/1%</th><th>Vega €/pt</th><th>CS01 €/bp</th></tr></thead><tbody>
+  $('#tblExpoGroup').innerHTML = `<table><thead><tr><th class="l">${esc(label)}</th><th>#</th><th>MV % AUM</th><th>Wt % CBs</th>${idxW?'<th>Wt % index</th>':''}<th>Avg δ</th><th>CB Δ %</th><th>Overlay Δ %</th><th>Net Δ %</th><th>Chg pp</th><th>Gamma €/1%</th><th>Vega €/pt</th><th>CS01 €/bp</th><th>DV01 €/bp</th><th>Theta €/d</th></tr></thead><tbody>
     ${list.map(x=>line(x,g0[x.k])).join('')}${line(T,null,'tot')}</tbody></table>`;
 }
 const EXPO_COLS = [
   ['name','Bond','l'],['und','Underlying','l'],['strat','Strategy','l'],['ccy','Ccy','l'],['mv','MV €','m'],['mvp','MV %','n2'],['delta','δ','n1'],
-  ['eq','Equity Δ €','e'],['eqp','Δ % AUM','n2'],['chg','Chg pp','s2'],['gamma','Gamma €/1%','e'],['vega','Vega €/pt','e'],['cs01','CS01 €/bp','e'],['cs','Spread bp','n0'],['iv','IV','n1'],['flags','Flags','f']
+  ['eq','Equity Δ €','e'],['eqp','Δ % AUM','n2'],['chg','Chg pp','s2'],['gamma','Gamma €/1%','e'],['vega','Vega €/pt','e'],['cs01','CS01 €/bp','e'],['dv01','DV01 €/bp','e'],['theta','Theta €/d','e'],['dur','Dur','n2'],['cs','Spread bp','n0'],['iv','IV','n1'],['flags','Flags','f']
 ];
 function expoPosRows(){
   const {s0,s1} = S.res.expo, L = expoLimits();
@@ -682,7 +691,7 @@ function expoPosRows(){
     if (L.posMax!=null && pA(r.mv,s1.aum) > L.posMax) flags.push(['size limit','bad']);
     out.push({...r, mvp:pA(r.mv,s1.aum), eqp:pA(r.eq,s1.aum), chg:pA(r.eq,s1.aum)-(r0?pA(r0.eq,s0.aum):0), flags});
   }
-  for (const r0 of s0.rows) if (!seen.has(r0.isin)) out.push({...r0, mv:0, eq:0, gamma:null, vega:null, cs01:null, mvp:0, eqp:0, chg:-pA(r0.eq,s0.aum), flags:[['sold','']]});
+  for (const r0 of s0.rows) if (!seen.has(r0.isin)) out.push({...r0, mv:0, eq:0, gamma:null, vega:null, cs01:null, dv01:null, theta:null, mvp:0, eqp:0, chg:-pA(r0.eq,s0.aum), flags:[['sold','']]});
   return out;
 }
 function renderExpoPos(){
@@ -701,7 +710,7 @@ function renderExpoPos(){
   box.querySelectorAll('th').forEach(th=>{ const h=()=>{ const k=th.dataset.k; S.expoSort = S.expoSort.key===k ? {key:k,dir:-S.expoSort.dir} : {key:k,dir:-1}; renderExpoPos(); }; th.addEventListener('click',h); th.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();h();}}); });
 }
 function expoCsv(){
-  const cols = ['isin','name','und','strat','ccy','region','sector','mv','mvp','delta','eq','eqp','chg','gamma','vega','cs01','cs','iv','src'];
+  const cols = ['isin','name','und','strat','ccy','region','sector','mv','mvp','delta','eq','eqp','chg','gamma','vega','cs01','dv01','dur','theta','decay','carry','cs','iv','src'];
   const q = v => v==null?'':(typeof v==='number'?String(Math.round(v*1e6)/1e6):'"'+String(v).replace(/"/g,'""')+'"');
   return [cols.join(','), ...expoPosRows().map(r=>cols.map(c=>q(r[c])).join(','))].join('\n');
 }
