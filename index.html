@@ -253,7 +253,8 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
           <div class="tiles" id="cvxTiles"></div>
           <div class="two" style="margin-top:16px">
             <div><h3>Composite convertible: price vs parity</h3><div class="chart" id="chCvxPrice" style="margin-top:8px"></div>
-              <div class="legend"><span><i style="background:var(--accent)"></i>Composite price</span><span><i style="background:var(--faint)"></i>Parity (45°) and bond floor</span><span><i style="background:var(--accent);opacity:.25"></i>±1σ move</span><span><i style="background:var(--info);opacity:.5;border-radius:50%"></i>Positions, sized by MV</span></div></div>
+              <div class="legend"><span><i style="background:var(--accent)"></i>Composite price</span><span><i style="background:var(--faint)"></i>Parity (45°) and bond floor</span><span><i style="background:var(--accent);opacity:.25"></i>±1σ move</span><span class="muted">Bubbles: positions, sized by MV, coloured by strategy</span></div>
+              <div class="legend" id="cvxStratLegend"></div></div>
             <div><h3>Delta vs equity move</h3><div class="chart" id="chCvxDelta" style="margin-top:8px"></div>
               <div class="legend"><span><i style="background:var(--accent)"></i>Composite CB delta, %</span><span><i style="background:var(--info)"></i>Net portfolio delta incl. overlay, % AUM</span></div></div>
           </div>
@@ -829,7 +830,7 @@ function lineChart(box, o){
   for (const tv of niceTicks(x0,x1,6)){ svg.appendChild(svgEl('line',{x1:X(tv),x2:X(tv),y1:H-pb,y2:H-pb+4,class:'zero'})); svg.appendChild(svgEl('text',{x:X(tv),y:H-pb+16,'text-anchor':'middle'},o.xfmt(tv))); }
   svg.appendChild(svgEl('line',{x1:pl,x2:W-pr,y1:H-pb,y2:H-pb,class:'zero'}));
   if (o.xlabel) svg.appendChild(svgEl('text',{x:W-pr,y:H-4,'text-anchor':'end'},o.xlabel));
-  for (const b of o.bubbles||[]){ const c=svgEl('circle',{cx:X(b.x),cy:Y(b.y),r:b.r,class:'bub'}); c.addEventListener('mousemove',ev=>{ ev.stopPropagation(); cross.setAttribute('visibility','hidden'); showTip(ev,b.tip); }); svg.appendChild(c); }
+  for (const b of o.bubbles||[]){ const c=svgEl('circle',{cx:X(b.x),cy:Y(b.y),r:b.r,class:'bub'}); if (b.color){ c.style.fill=b.color; c.style.stroke=b.color; } c.addEventListener('mousemove',ev=>{ ev.stopPropagation(); cross.setAttribute('visibility','hidden'); showTip(ev,b.tip); }); svg.appendChild(c); }
   for (const s of o.series){ const d=s.y.map((v,j)=>v==null?'':`${j&&s.y[j-1]!=null?'L':'M'}${X(xs[j]).toFixed(1)},${Y(v).toFixed(1)}`).join(''); svg.appendChild(svgEl('path',{d,class:'ln '+s.cls})); }
   for (const mk of o.markers||[]){ svg.appendChild(svgEl('circle',{cx:X(mk.x),cy:Y(mk.y),r:4.5,class:'mk '+(mk.cls||'')})); svg.appendChild(svgEl('text',{x:X(mk.x)+(mk.dx||8),y:Y(mk.y)+(mk.dy||-8),'text-anchor':mk.anchor||'start',class:'lab'},mk.label)); }
   svg.appendChild(cross);
@@ -837,6 +838,8 @@ function lineChart(box, o){
   svg.addEventListener('mouseleave',()=>{ cross.setAttribute('visibility','hidden'); hideTip(); });
   box.appendChild(svg);
 }
+// categorical, kept away from the accent (composite curve) hue
+const STRAT_COLORS = ['#5b9bd5','#5cb77c','#b07ee0','#e06c8c','#3fb8b0','#8f9bb3','#c9a227','#7f8fe0'];
 function renderConvexity(){
   if (!S.res) return;
   const C = convexity(), P = C.pts, p0 = P[C.j0], pM = P[C.jMax], s = C.s;
@@ -857,7 +860,11 @@ function renderConvexity(){
   const band = [Math.exp(-sig)-1, Math.exp(sig)-1];
   const pos = s.rows.map(r=>({r, x:r.ix&&r.ix.par!=null?r.ix.par:r.par, y:r.ix&&r.ix.P!=null?r.ix.P:(r.perPt?r.mv/r.perPt:null)})).filter(b=>b.x!=null&&b.y!=null&&b.r.mv>0);
   const mvMax = Math.max(...pos.map(b=>b.r.mv), 1);
-  const bubbles = pos.map(({r,x,y})=>({x, y, r:3+11*Math.sqrt(Math.max(r.mv,0)/mvMax),
+  const stratMv = {}; for (const b of pos) stratMv[b.r.strat] = (stratMv[b.r.strat]||0) + b.r.mv;
+  const strats = Object.keys(stratMv).sort((a,b)=>stratMv[b]-stratMv[a]);
+  const colorOf = k => STRAT_COLORS[strats.indexOf(k) % STRAT_COLORS.length];
+  $('#cvxStratLegend').innerHTML = strats.map(k=>`<span><i style="background:${colorOf(k)};border-radius:50%"></i>${esc(k)} · ${fmtN(pA(stratMv[k],s.aum),1)}%</span>`).join('');
+  const bubbles = pos.map(({r,x,y})=>({x, y, r:3+11*Math.sqrt(Math.max(r.mv,0)/mvMax), color:colorOf(r.strat),
     tip:`<b>${esc(r.name)}</b><div class="num"><span class="muted">MV</span><span>${fmtEUR(r.mv)} € · ${fmtN(pA(r.mv,s.aum),2)}%</span></div><div class="num"><span class="muted">Price</span><span>${fmtN(y,2)}</span></div><div class="num"><span class="muted">Parity</span><span>${fmtN(x,2)}</span></div><div class="num"><span class="muted">Premium</span><span>${fmtN((y/x-1)*100,1)}%</span></div><div class="num"><span class="muted">Delta</span><span>${fmtN(r.delta,1)}%</span></div><div class="muted small" style="margin-top:4px">${esc(r.strat)} · ${esc(r.ccy)}</div>`}));
   lineChart($('#chCvxPrice'), {label:'Composite price vs parity', x:P.map(p=>p.parity), xfmt:v=>fmtN(v,0), xlabel:'composite parity',
     series:[{y:P.map(p=>p.price),cls:'a'},{y:P.map(p=>p.parity),cls:'ref'},{y:P.map(p=>p.floor),cls:'ref'}],
