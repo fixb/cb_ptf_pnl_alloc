@@ -235,7 +235,7 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
           <div class="tblwrap" id="tblExpoGroup" style="margin-top:16px"></div>
           <h3 style="margin-top:16px">Positions</h3>
           <div class="tblwrap" id="tblExpoPos" style="margin-top:6px"></div>
-          <p class="muted small" style="margin-top:6px">Equity delta = δ × parity × nominal, in EUR. Gamma = change in equity delta for a +1% stock move. Vega per vol point, CS01 per +1 bp of spread (index Rho). DV01 = −MV × duration × 1 bp, per +1 bp of rates, duration from the index file (BgAM if missing). Theta per calendar day = gamma decay −½ × IV² × parity × Γ / 365 (the breakeven of the gamma term used in the attribution) + coupon accrual; an estimate, not the pricing model's theta. Greeks from the index file at each date; bonds missing from the index fall back to BgAM delta and parity (no gamma/vega/CS01). Index options and futures enter at their delta-adjusted exposure.</p>
+          <p class="muted small" style="margin-top:6px">Equity delta = δ × parity × nominal, in EUR. Gamma = change in equity delta for a +1% stock move. Vega per vol point, CS01 per +1 bp of spread (index Rho). DV01 = −MV × duration × 1 bp, per +1 bp of rates, duration from the index file (BgAM if missing). Theta per calendar day = gamma decay −½ × IV² × parity × Γ / 365 (the breakeven of the gamma term used in the attribution) + coupon accrual; an estimate, not the pricing model's theta. Index options: Black-Scholes gamma, vega and theta (zero rates and dividends) from BgAM delta and IV, with expiry read from the instrument name and d1 backed out of the delta. Greeks from the index file at each date; bonds missing from the index fall back to BgAM delta and parity (no gamma/vega/CS01). Index options and futures enter delta at their delta-adjusted exposure.</p>
         </div>
         <div class="view" id="view-strategy" hidden style="padding-top:12px"><div class="tblwrap" id="tblStrategy"></div></div>
         <div class="view" id="view-region" hidden style="padding-top:12px"><div class="tblwrap" id="tblRegion"></div></div>
@@ -579,6 +579,37 @@ function run(){
 function zeroComps(){ const o={}; for (const [k] of COMPS) o[k]=0; return o; }
 
 /* ===================== exposures ===================== */
+const MONTHS = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+function optExpiry(name){ // "LISTED xSPX 6700 EC 17th Dec 27" or "... 17/12/2027"
+  let m = String(name).match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{2}|\d{4})\b/);
+  if (m && MONTHS.includes(m[2].toLowerCase())) return new Date(Date.UTC(m[3].length===2?2000+ +m[3]:+m[3], MONTHS.indexOf(m[2].toLowerCase()), +m[1]));
+  m = String(name).match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+  return m ? new Date(Date.UTC(+m[3],+m[2]-1,+m[1])) : null;
+}
+function invNorm(p){ // Acklam's rational approximation
+  const a=[-39.6968302866538,220.946098424521,-275.928510446969,138.357751867269,-30.6647980661472,2.50662827745924],
+        b=[-54.4760987982241,161.585836858041,-155.698979859887,66.8013118877197,-13.2806815528857],
+        c=[-0.00778489400243029,-0.322396458041136,-2.40075827716184,-2.54973253934373,4.37466414146497,2.93816398269878],
+        d=[0.00778469570904146,0.32246712907004,2.445134137143,3.75440866190742];
+  const lo=0.02425, q=p<lo?Math.sqrt(-2*Math.log(p)):p>1-lo?Math.sqrt(-2*Math.log(1-p)):null;
+  if (q!=null){ const v=(((((c[0]*q+c[1])*q+c[2])*q+c[3])*q+c[4])*q+c[5])/((((d[0]*q+d[1])*q+d[2])*q+d[3])*q+1); return p<lo?v:-v; }
+  const u=p-0.5, r=u*u; return (((((a[0]*r+a[1])*r+a[2])*r+a[3])*r+a[4])*r+a[5])*u/(((((b[0]*r+b[1])*r+b[2])*r+b[3])*r+b[4])*r+1);
+}
+// Black-Scholes greeks (r = q = 0) for a listed option, with d1 backed out of the reported delta so
+// neither strike nor underlying level is needed. Notional = delta-adjusted exposure / delta, in EUR.
+function optGreeks(o, date){
+  const out = {gamma:null, vega:null, theta:null, expiry:null};
+  if (o.kind!=='Option') return out;
+  out.expiry = optExpiry(o.name);
+  const sig = o.iv!=null ? (o.iv>3 ? o.iv/100 : o.iv) : null, d = o.delta;
+  if (!out.expiry || !date || !sig || !d || Math.abs(d)>=1) return out;
+  const T = (out.expiry-date)/(365*864e5); if (T<=0) return out;
+  const d1 = invNorm(d>0 ? d : d+1), phi = Math.exp(-d1*d1/2)/Math.sqrt(2*Math.PI), notional = o.expo/d;
+  out.gamma = notional*phi/(sig*Math.sqrt(T))*0.01;   // change in delta exposure for +1%
+  out.vega = notional*phi*Math.sqrt(T)/100;           // per vol point
+  out.theta = -notional*0.5*sig*phi/Math.sqrt(T)/365; // per calendar day
+  return out;
+}
 // One snapshot per date: each exposure report with the index file of the same date.
 function expoSnap(E, I, aumAlt){
   const aum = E.aum || aumAlt || 1, rows = [], regionOf = {};
@@ -603,11 +634,13 @@ function expoSnap(E, I, aumAlt){
     rows.push(r);
     if (p.country && r.region!=='n/a') regionOf[norm(p.country)] = r.region;
   }
-  const ovl = E.overlay.map(o=>({name:o.name, und:String(o.und||'—'), strat:o.strat||'—', ccy:ccyOfOverlay(o), region:regionOf[norm(o.country)]||'n/a', sector:'Index overlay', eq:o.expo, kind:o.kind}));
+  const ovl = E.overlay.map(o=>({name:o.name, und:String(o.und||'—'), strat:o.strat||'—', ccy:ccyOfOverlay(o), region:regionOf[norm(o.country)]||'n/a', sector:'Index overlay', eq:o.expo, kind:o.kind,
+    delta:o.delta!=null ? o.delta*100 : null, iv:o.iv!=null ? (o.iv>3 ? o.iv : o.iv*100) : null, ...optGreeks(o, E.date)}));
   const tot = {mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0, decay:0, carry:0, theta:0, dv01:0, durMv:0, mvDur:0};
   for (const r of rows){ tot.mv+=r.mv; tot.eq+=r.eq; tot.gamma+=r.gamma||0; tot.vega+=r.vega||0; tot.cs01+=r.cs01||0; if (r.delta!=null) tot.dmv+=r.delta*r.mv;
     tot.decay+=r.decay||0; tot.carry+=r.carry||0; tot.theta+=r.theta||0; tot.dv01+=r.dv01||0; if (r.dur!=null){ tot.durMv+=r.dur*r.mv; tot.mvDur+=r.mv; } }
-  for (const o of ovl) tot.ovl+=o.eq;
+  tot.optTheta = 0;
+  for (const o of ovl){ tot.ovl+=o.eq; tot.gamma+=o.gamma||0; tot.vega+=o.vega||0; tot.theta+=o.theta||0; tot.optTheta+=o.theta||0; }
   tot.net = tot.eq + tot.ovl; tot.avgDelta = tot.mv ? tot.dmv/tot.mv : null; tot.avgDur = tot.mvDur ? tot.durMv/tot.mvDur : null;
   const idx = {region:{}, sector:{}, ccy:{}, w:0, dw:0};
   for (const b of I.list){ if (!b.w) continue; idx.w+=b.w; if (b.delta!=null) idx.dw+=b.w*b.delta; for (const k of ['region','sector','ccy']){ const g=b[k]||'n/a'; idx[k][g]=(idx[k][g]||0)+b.w; } }
@@ -619,7 +652,7 @@ function expoGroups(snap, key){
   const g = {};
   const G = k => g[k] || (g[k] = {k, n:0, mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0, theta:0, dv01:0});
   for (const r of snap.rows){ const x=G(r[key]||'—'); x.n++; x.mv+=r.mv; x.eq+=r.eq; x.gamma+=r.gamma||0; x.vega+=r.vega||0; x.cs01+=r.cs01||0; x.theta+=r.theta||0; x.dv01+=r.dv01||0; if (r.delta!=null) x.dmv+=r.delta*r.mv; }
-  for (const o of snap.ovl){ const x=G(o[key]||'—'); x.ovl+=o.eq; }
+  for (const o of snap.ovl){ const x=G(o[key]||'—'); x.ovl+=o.eq; x.gamma+=o.gamma||0; x.vega+=o.vega||0; x.theta+=o.theta||0; }
   for (const x of Object.values(g)) x.net = x.eq + x.ovl;
   return g;
 }
@@ -642,7 +675,7 @@ function renderExpo(){
     tP('Net equity delta','net','hero') + tP('CB equity delta','eq') + tP('Overlay delta','ovl') + tP('CB market value','mv') +
     `<div class="tile"><span class="k">Avg delta (MV-weighted)</span><span class="v">${fmtN(t1.avgDelta,1)}%</span><span class="s">index ${fmtN(s1.idx.avgDelta,1)}% · ${chg((t1.avgDelta||0)-(t0.avgDelta||0),1,' pp')}</span></div>` +
     tS('Gamma','gamma','per +1% stocks') + tS('Vega','vega','per vol pt') + tS('CS01','cs01','per +1 bp spread') +
-    `<div class="tile"><span class="k">Theta</span><span class="v">${fmtS(t1.theta,0)}</span><span class="s">€ per day · decay ${fmtS(t1.decay,0)} · carry ${fmtS(t1.carry,0)} · ${chg(t1.theta-t0.theta,0,' €')}</span></div>` +
+    `<div class="tile"><span class="k">Theta</span><span class="v">${fmtS(t1.theta,0)}</span><span class="s">€ per day · CB decay ${fmtS(t1.decay,0)} · CB carry ${fmtS(t1.carry,0)} · options ${fmtS(t1.optTheta,0)} · ${chg(t1.theta-t0.theta,0,' €')}</span></div>` +
     `<div class="tile"><span class="k">DV01</span><span class="v">${fmtS(t1.dv01,0)}</span><span class="s">€ per +1 bp rates · ${fmtS(bps(t1.dv01),2)} bps · avg duration ${fmtN(t1.avgDur,2)} · ${chg(t1.dv01-t0.dv01,0,' €')}</span></div>`;
   renderExpoLimits(); renderExpoGroup(); renderExpoPos();
 }
@@ -692,6 +725,12 @@ function expoPosRows(){
     out.push({...r, mvp:pA(r.mv,s1.aum), eqp:pA(r.eq,s1.aum), chg:pA(r.eq,s1.aum)-(r0?pA(r0.eq,s0.aum):0), flags});
   }
   for (const r0 of s0.rows) if (!seen.has(r0.isin)) out.push({...r0, mv:0, eq:0, gamma:null, vega:null, cs01:null, dv01:null, theta:null, mvp:0, eqp:0, chg:-pA(r0.eq,s0.aum), flags:[['sold','']]});
+  const ovl0 = {}; for (const o of s0.ovl) ovl0[o.name] = o;
+  for (const o of s1.ovl){
+    const flags = [[o.kind==='Option'?'overlay option':'overlay future','']];
+    if (o.kind==='Option' && o.theta==null) flags.push(['no expiry/IV — greeks n/a','warn']);
+    out.push({...o, isin:'', mv:null, mvp:null, cs01:null, dv01:null, dur:null, cs:null, eqp:pA(o.eq,s1.aum), chg:pA(o.eq,s1.aum)-(ovl0[o.name]?pA(ovl0[o.name].eq,s0.aum):0), flags});
+  }
   return out;
 }
 function renderExpoPos(){
@@ -700,7 +739,7 @@ function renderExpoPos(){
   const cell = (r,[k,,t]) => {
     if (t==='l') return `<td class="l">${esc(r[k])}</td>`;
     if (t==='f') return `<td class="l">${r.flags.map(([f,c])=>`<span class="flag ${c}">${esc(f)}</span>`).join('')}</td>`;
-    if (t==='m') return `<td class="num">${fmtEUR(r[k])}</td>`;
+    if (t==='m') return `<td class="num">${r[k]==null?'—':fmtEUR(r[k])}</td>`;
     if (t==='e') return `<td class="num">${r[k]==null?'—':fmtS(r[k],0)}</td>`;
     if (t[0]==='s') return `<td class="num ${r[k]<0?'neg':r[k]>0?'pos':''}">${fmtS(r[k],+t[1])}</td>`;
     return `<td class="num">${fmtN(r[k],+t[1])}</td>`;
@@ -938,7 +977,7 @@ function demo(){
     mk('XS0000000003','Sample Insurer 0% 2030','HKD',0,104.1,104.6,58.9,59.3,95.1,95.7,62,62.5,140,140,30,30,0.35,-0.20,0.30,'Asia','Financials',0.10),
     mk('XS0000000004','Sample Steel 0% 2031','JPY',0,107.3,106.2,3410,3362,92.8,91.5,55,54,60,60,27,27.5,0.40,-0.22,0.33,'Japan','Materials',0.12),
     mk('FR0000000005','Sample Utility 1.5% 2033','EUR',1.5,105.9,106.4,101.2,101.9,79.1,79.6,60,60.4,75,75,24,23.5,0.36,-0.33,0.29,'Europe','Utilities',0.18)];
-  const E=(date,k)=>({kind:'expo',title:'Sample book',date,fx:{'EUR/USD':k?1.1144:1.1177,'EUR/JPY':k?175.95:176.16,'EUR/HKD':k?8.743:8.770},aum:80e6,cbs:{},overlay:[{name:'LISTED xSPX 6700 EC 17th Dec 27',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Option',expo:k?12.28e6:12.06e6,delta:k?0.8435:0.8359,px:k?1507.39:1464.86,country:'United States of America'},{name:'Fut S&P 500 Index DEC26',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Future',expo:k?-1.7467e6:-1.7308e6,delta:1,px:k?7763:7715.75,country:'United States of America'}],fname:'sample_exposure_'+(k?'T1':'T0')+'.xlsx'});
+  const E=(date,k)=>({kind:'expo',title:'Sample book',date,fx:{'EUR/USD':k?1.1144:1.1177,'EUR/JPY':k?175.95:176.16,'EUR/HKD':k?8.743:8.770},aum:80e6,cbs:{},overlay:[{name:'LISTED xSPX 6700 EC 17th Dec 27',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Option',expo:k?12.28e6:12.06e6,delta:k?0.8435:0.8359,px:k?1507.39:1464.86,iv:k?0.168:0.171,country:'United States of America'},{name:'Fut S&P 500 Index DEC26',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Future',expo:k?-1.7467e6:-1.7308e6,delta:1,px:k?7763:7715.75,country:'United States of America'}],fname:'sample_exposure_'+(k?'T1':'T0')+'.xlsx'});
   const E0=E(new Date(Date.UTC(2026,9,27)),0), E1=E(new Date(Date.UTC(2026,9,28)),1);
   const nom={XS0000000001:1.5e6,US000000AA01:2e6,XS0000000003:16e6,XS0000000004:300e6,FR0000000005:2.5e6};
   const strat={EUR:'CB3. DELTA EUROPE',USD:'CB2. DELTA USA',HKD:'CB4. DELTA ASIA',JPY:'CB4. DELTA ASIA'};
