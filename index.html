@@ -116,6 +116,11 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
 .chart rect.up{fill:var(--pos)} .chart rect.dn{fill:var(--neg)} .chart rect.tot{fill:var(--accent)}
 .chart rect.hit{fill:transparent;cursor:default}
 .chart rect.hit:hover + rect{filter:brightness(1.15)}
+.chart path.ln{fill:none;stroke-width:2}
+.chart path.ln.a{stroke:var(--accent)} .chart path.ln.b{stroke:var(--info)}
+.chart path.ln.ref{stroke:var(--faint);stroke-width:1;stroke-dasharray:4 3}
+.chart rect.band{fill:var(--accent);opacity:.09}
+.chart circle.mk{fill:var(--panel);stroke-width:2} .chart circle.mk.now{stroke:var(--fg)} .chart circle.mk.max{stroke:var(--accent)}
 .tip{position:fixed;z-index:20;pointer-events:none;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:8px 10px;font-size:12px;max-width:280px;box-shadow:0 6px 20px rgba(0,0,0,.35);display:none}
 .tip b{display:block;margin-bottom:4px}
 .tip .num{display:flex;justify-content:space-between;gap:12px}
@@ -200,6 +205,7 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
         <div class="tabs" role="tablist" id="tabs">
           <button class="tab" role="tab" data-view="contrib" aria-selected="true" type="button">Contributors</button>
           <button class="tab" role="tab" data-view="expo" type="button">Exposures</button>
+          <button class="tab" role="tab" data-view="convexity" type="button">Convexity</button>
           <button class="tab" role="tab" data-view="strategy" type="button">By strategy</button>
           <button class="tab" role="tab" data-view="region" type="button">By region</button>
           <button class="tab" role="tab" data-view="sector" type="button">By sector</button>
@@ -236,6 +242,23 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
           <h3 style="margin-top:16px">Positions</h3>
           <div class="tblwrap" id="tblExpoPos" style="margin-top:6px"></div>
           <p class="muted small" style="margin-top:6px">Equity delta = δ × parity × nominal, in EUR. Gamma = change in equity delta for a +1% stock move. Vega per vol point, CS01 per +1 bp of spread (index Rho). DV01 = −MV × duration × 1 bp, per +1 bp of rates, duration from the index file (BgAM if missing). Theta per calendar day = gamma decay −½ × IV² × parity × Γ / 365 (the breakeven of the gamma term used in the attribution) + coupon accrual; an estimate, not the pricing model's theta. Index options: Black-Scholes gamma, vega and theta (zero rates and dividends) from BgAM delta and IV, with expiry read from the instrument name and d1 backed out of the delta. Greeks from the index file at each date; bonds missing from the index fall back to BgAM delta and parity (no gamma/vega/CS01). Index options and futures enter delta at their delta-adjusted exposure.</p>
+        </div>
+        <div class="view" id="view-convexity" hidden style="padding-top:12px">
+          <div class="row" style="justify-content:space-between;margin-bottom:10px">
+            <p class="muted small" id="cvxNote" style="max-width:90ch"></p>
+            <div class="row"><label class="small muted" for="cvxHorizon">Horizon</label>
+              <select id="cvxHorizon" class="btn"><option value="5">1 week</option><option value="21" selected>1 month</option><option value="63">3 months</option></select></div>
+          </div>
+          <div class="tiles" id="cvxTiles"></div>
+          <div class="two" style="margin-top:16px">
+            <div><h3>Composite convertible: price vs parity</h3><div class="chart" id="chCvxPrice" style="margin-top:8px"></div>
+              <div class="legend"><span><i style="background:var(--accent)"></i>Composite price</span><span><i style="background:var(--faint)"></i>Parity (45°) and bond floor</span><span><i style="background:var(--accent);opacity:.25"></i>±1σ move</span></div></div>
+            <div><h3>Delta vs equity move</h3><div class="chart" id="chCvxDelta" style="margin-top:8px"></div>
+              <div class="legend"><span><i style="background:var(--accent)"></i>Composite CB delta, %</span><span><i style="background:var(--info)"></i>Net portfolio delta incl. overlay, % AUM</span></div></div>
+          </div>
+          <h3 style="margin-top:16px">Scenarios: all stocks move together</h3>
+          <div class="tblwrap" id="tblCvx" style="margin-top:6px"></div>
+          <p class="muted small" style="margin-top:6px">Each CB is modelled as its current price plus a Black-Scholes call on parity calibrated to the index delta and gamma (d1 from δ, total vol from Γ, strike implied); index options use BgAM delta, IV and expiry; futures are linear. Static: no time decay, no vol or spread change, every stock moves by the same percentage (beta 1). Max convexity is the move at which the composite gamma peaks. "Of which convexity" is the CB P&amp;L beyond today's delta × move.</p>
         </div>
         <div class="view" id="view-strategy" hidden style="padding-top:12px"><div class="tblwrap" id="tblStrategy"></div></div>
         <div class="view" id="view-region" hidden style="padding-top:12px"><div class="tblwrap" id="tblRegion"></div></div>
@@ -619,7 +642,7 @@ function expoSnap(E, I, aumAlt){
     const par = i&&i.par!=null ? i.par : p.parity;
     const delta = i&&i.delta!=null ? i.delta : (p.delta!=null ? p.delta*100 : null);
     const r = {isin:p.isin, name:p.name, und:String(p.und||p.name), strat:p.strat||'—', ccy:(i&&i.ccy)||'EUR', region:(i&&i.region)||'n/a', sector:(i&&i.sector)||'n/a',
-      mv:p.expo, delta, src:i?'index':'BgAM', ovl:0,
+      mv:p.expo, delta, src:i?'index':'BgAM', ovl:0, ix:i, perPt, par,
       eq: par!=null&&delta!=null ? perPt*par*delta/100 : 0,
       gamma: i&&i.gamma!=null&&par!=null ? perPt*par*i.gamma/100 : null,
       vega: i&&i.vega!=null ? perPt*i.vega : null,
@@ -635,7 +658,7 @@ function expoSnap(E, I, aumAlt){
     if (p.country && r.region!=='n/a') regionOf[norm(p.country)] = r.region;
   }
   const ovl = E.overlay.map(o=>({name:o.name, und:String(o.und||'—'), strat:o.strat||'—', ccy:ccyOfOverlay(o), region:regionOf[norm(o.country)]||'n/a', sector:'Index overlay', eq:o.expo, kind:o.kind,
-    delta:o.delta!=null ? o.delta*100 : null, iv:o.iv!=null ? (o.iv>3 ? o.iv : o.iv*100) : null, ...optGreeks(o, E.date)}));
+    delta:o.delta!=null ? o.delta*100 : null, iv:o.iv!=null ? (o.iv>3 ? o.iv : o.iv*100) : null, raw:o, ...optGreeks(o, E.date)}));
   const tot = {mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0, decay:0, carry:0, theta:0, dv01:0, durMv:0, mvDur:0};
   for (const r of rows){ tot.mv+=r.mv; tot.eq+=r.eq; tot.gamma+=r.gamma||0; tot.vega+=r.vega||0; tot.cs01+=r.cs01||0; if (r.delta!=null) tot.dmv+=r.delta*r.mv;
     tot.decay+=r.decay||0; tot.carry+=r.carry||0; tot.theta+=r.theta||0; tot.dv01+=r.dv01||0; if (r.dur!=null){ tot.durMv+=r.dur*r.mv; tot.mvDur+=r.mv; } }
@@ -748,6 +771,101 @@ function renderExpoPos(){
   box.innerHTML = `<table><thead><tr>${EXPO_COLS.map(([k,l,t])=>`<th class="${t==='l'||t==='f'?'l':''}" data-k="${k}" tabindex="0">${l}${key===k?(dir>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${EXPO_COLS.map(c=>cell(r,c)).join('')}</tr>`).join('')}</tbody></table>`;
   box.querySelectorAll('th').forEach(th=>{ const h=()=>{ const k=th.dataset.k; S.expoSort = S.expoSort.key===k ? {key:k,dir:-S.expoSort.dir} : {key:k,dir:-1}; renderExpoPos(); }; th.addEventListener('click',h); th.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();h();}}); });
 }
+/* ===================== convexity (composite convertible) ===================== */
+// Each CB is replaced by its price plus a Black-Scholes call on parity, calibrated so that the
+// current price, delta and gamma match the index file: d1 from delta, total vol v = σ√T from gamma
+// (Γ = φ(d1)/v in delta points per 1%), strike from d1 and v. Credit is held constant, so the
+// downside flattens towards the implied floor instead of following a spread widening.
+const normCdf = x => { const t=1/(1+0.2316419*Math.abs(x)), y=t*(0.319381530+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+t*1.330274429)))); const p=1-Math.exp(-x*x/2)/Math.sqrt(2*Math.PI)*y; return x>=0?p:1-p; };
+const normPdf = x => Math.exp(-x*x/2)/Math.sqrt(2*Math.PI);
+const callX = (x,k,v) => { const d1=(Math.log(x/k)+v*v/2)/v; return {c:x*normCdf(d1)-k*normCdf(d1-v), d:normCdf(d1), g:normPdf(d1)/v}; }; // spot normalised to 1
+function calib(delta, v){ const d1=invNorm(Math.min(0.995,Math.max(0.005,delta))); return {k:Math.exp(-d1*v+v*v/2), c0:null}; }
+const CVX_MOVES = Array.from({length:151},(_,j)=>-0.5+j*0.01);
+function convexity(){
+  const s = S.res.expo.s1, legs = [];
+  for (const r of s.rows){
+    const i = r.ix;
+    if (!i || i.par==null || i.delta==null || i.P==null){ legs.push({kind:'lin', perPt:r.perPt, par:r.par||0, d:(r.delta||0)/100, P:i&&i.P!=null?i.P:r.mv/r.perPt}); continue; }
+    const d = Math.min(0.995,Math.max(0.005,i.delta/100));
+    let v = i.gamma>0 ? normPdf(invNorm(d))/i.gamma : null;
+    if (!(v>0.05 && v<3)) v = (i.iv||30)/100*Math.sqrt(3);
+    const {k} = calib(d,v);
+    legs.push({kind:'cb', perPt:r.perPt, par:i.par, P:i.P, inv:i.inv, k, v, c0:callX(1,k,v).c, iv:i.iv});
+  }
+  for (const o of s.ovl){
+    const raw = o.raw;
+    if (o.kind==='Option' && o.expiry && raw.delta && Math.abs(raw.delta)<1 && o.iv){
+      const T = (o.expiry - s.date)/(365*864e5), v = o.iv/100*Math.sqrt(Math.max(T,1/365)), put = raw.delta<0;
+      const {k} = calib(put ? raw.delta+1 : raw.delta, v);
+      legs.push({kind:'opt', notional:raw.expo/raw.delta, k, v, put, c0:callX(1,k,v).c});
+    } else legs.push({kind:'fut', expo:o.eq});
+  }
+  const pts = CVX_MOVES.map(m=>{
+    const x = 1+m; let V=0, par=0, dpar=0, w=0, floor=0, cbEq=0, ovEq=0, ovPnl=0;
+    for (const L of legs){
+      if (L.kind==='cb'){ const q=callX(x,L.k,L.v); V+=L.perPt*(L.P+L.par*(q.c-L.c0)); par+=L.perPt*L.par*x; dpar+=L.perPt*L.par*x*q.d; w+=L.perPt; floor+=L.perPt*(L.inv!=null?L.inv:L.P-L.par*L.c0); cbEq+=L.perPt*L.par*x*q.d; }
+      else if (L.kind==='lin'){ V+=L.perPt*(L.P+L.par*L.d*m); par+=L.perPt*L.par*x; dpar+=L.perPt*L.par*x*L.d; w+=L.perPt; floor+=L.perPt*L.P; cbEq+=L.perPt*L.par*x*L.d; }
+      else if (L.kind==='opt'){ const q=callX(x,L.k,L.v), dd=L.put?q.d-1:q.d, c=L.put?q.c-x+L.k:q.c, c0=L.put?L.c0-1+L.k:L.c0; ovEq+=L.notional*x*dd; ovPnl+=L.notional*(c-c0); }
+      else { ovEq+=L.expo*x; ovPnl+=L.expo*m; }
+    }
+    return {m, V, price:V/w, parity:par/w, floor:floor/w, delta:dpar/par*100, cbEq, ovEq, net:(cbEq+ovEq)/s.aum*100, ovPnl};
+  });
+  const j0 = CVX_MOVES.findIndex(m=>Math.abs(m)<1e-9);
+  pts.forEach((p,j)=>{ const a=pts[Math.max(0,j-1)], b=pts[Math.min(pts.length-1,j+1)]; p.gamma=(b.delta-a.delta)/(Math.log(1+b.m)-Math.log(1+a.m))/100; });
+  let jMax = 1; for (let j=1;j<pts.length-1;j++) if (pts[j].gamma>pts[jMax].gamma) jMax=j;
+  let vw=0, ww=0; for (const L of legs) if (L.kind==='cb' && L.iv){ const wt=L.perPt*L.par; vw+=wt*L.iv; ww+=wt; }
+  return {pts, j0, jMax, iv:ww?vw/ww:25, s};
+}
+function lineChart(box, o){
+  box.innerHTML=''; const W=Math.max(320, box.clientWidth||520), H=o.h||280, pl=46, pr=12, pt=12, pb=34;
+  const xs=o.x, ys=o.series.flatMap(s=>s.y).concat(o.extraY||[]).filter(v=>v!=null&&isFinite(v));
+  const x0=Math.min(...xs), x1=Math.max(...xs); let y0=Math.min(...ys), y1=Math.max(...ys); const py=(y1-y0)*0.06||1; y0-=py; y1+=py;
+  const X=v=>pl+(v-x0)/(x1-x0)*(W-pl-pr), Y=v=>pt+(y1-v)/(y1-y0)*(H-pt-pb);
+  const svg=svgEl('svg',{viewBox:`0 0 ${W} ${H}`,role:'img','aria-label':o.label});
+  if (o.band) svg.appendChild(svgEl('rect',{x:X(o.band[0]),y:pt,width:X(o.band[1])-X(o.band[0]),height:H-pt-pb,class:'band'}));
+  for (const tv of niceTicks(y0,y1,5)){ svg.appendChild(svgEl('line',{x1:pl,x2:W-pr,y1:Y(tv),y2:Y(tv),class:'grid'})); svg.appendChild(svgEl('text',{x:pl-6,y:Y(tv)+4,'text-anchor':'end'},fmtN(tv,0))); }
+  for (const tv of niceTicks(x0,x1,6)){ svg.appendChild(svgEl('line',{x1:X(tv),x2:X(tv),y1:H-pb,y2:H-pb+4,class:'zero'})); svg.appendChild(svgEl('text',{x:X(tv),y:H-pb+16,'text-anchor':'middle'},o.xfmt(tv))); }
+  svg.appendChild(svgEl('line',{x1:pl,x2:W-pr,y1:H-pb,y2:H-pb,class:'zero'}));
+  if (o.xlabel) svg.appendChild(svgEl('text',{x:W-pr,y:H-4,'text-anchor':'end'},o.xlabel));
+  for (const s of o.series){ const d=s.y.map((v,j)=>v==null?'':`${j&&s.y[j-1]!=null?'L':'M'}${X(xs[j]).toFixed(1)},${Y(v).toFixed(1)}`).join(''); svg.appendChild(svgEl('path',{d,class:'ln '+s.cls})); }
+  for (const mk of o.markers||[]){ svg.appendChild(svgEl('circle',{cx:X(mk.x),cy:Y(mk.y),r:4.5,class:'mk '+(mk.cls||'')})); svg.appendChild(svgEl('text',{x:X(mk.x)+(mk.dx||8),y:Y(mk.y)+(mk.dy||-8),'text-anchor':mk.anchor||'start',class:'lab'},mk.label)); }
+  const cross=svgEl('line',{x1:0,x2:0,y1:pt,y2:H-pb,class:'conn',visibility:'hidden'}); svg.appendChild(cross);
+  svg.addEventListener('mousemove',ev=>{ const r=svg.getBoundingClientRect(), vx=(ev.clientX-r.left)/r.width*W; let j=0, best=Infinity; xs.forEach((v,i)=>{ const dd=Math.abs(X(v)-vx); if(dd<best){best=dd;j=i;} }); cross.setAttribute('x1',X(xs[j])); cross.setAttribute('x2',X(xs[j])); cross.setAttribute('visibility','visible'); showTip(ev,o.tip(j)); });
+  svg.addEventListener('mouseleave',()=>{ cross.setAttribute('visibility','hidden'); hideTip(); });
+  box.appendChild(svg);
+}
+function renderConvexity(){
+  if (!S.res) return;
+  const C = convexity(), P = C.pts, p0 = P[C.j0], pM = P[C.jMax], s = C.s;
+  const h = num($('#cvxHorizon').value)||21, sig = C.iv/100*Math.sqrt(h/252);
+  const at = m => { const j = Math.round((Math.min(1,Math.max(-0.5,m))+0.5)/0.01); return P[j]; };
+  const up = at(0.2), dn = at(-0.2);
+  const partUp = (up.price-p0.price)/(up.parity-p0.parity)*100, partDn = (dn.price-p0.price)/(dn.parity-p0.parity)*100;
+  const zone = p0.delta<30 ? 'bond-like' : p0.delta>75 ? 'equity-like' : 'balanced';
+  const tile = (k,v,sub,cls='') => `<div class="tile ${cls}"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${sub}</span></div>`;
+  $('#cvxTiles').innerHTML =
+    tile('Composite delta', fmtN(p0.delta,1)+'%', zone+' zone', 'hero') +
+    tile('Max convexity at', fmtS(pM.m*100,0)+'%', `equity move · δ ${fmtN(pM.delta,0)}% · parity ${fmtN(pM.parity,1)}`) +
+    tile('Gamma now / max', fmtN(p0.gamma/pM.gamma*100,0)+'%', `${fmtN(p0.gamma,2)} vs ${fmtN(pM.gamma,2)} δ pts per 1%`) +
+    tile('Conversion premium', fmtN((p0.price/p0.parity-1)*100,1)+'%', `price ${fmtN(p0.price,2)} · parity ${fmtN(p0.parity,2)}`) +
+    tile('Premium over floor', fmtN((p0.price/p0.floor-1)*100,1)+'%', `floor ${fmtN(p0.floor,2)}`) +
+    tile('Participation ±20%', `${fmtN(partUp,0)} / ${fmtN(partDn,0)}`, 'up / down, % of parity move');
+  $('#cvxNote').textContent = `Composite of ${s.rows.length} CBs, in points per 100 nominal (MV-weighted). Shaded: ±1σ equity move over ${h} trading days at the composite implied vol of ${fmtN(C.iv,1)}% (±${fmtN(sig*100,1)}%).`;
+  const band = [Math.exp(-sig)-1, Math.exp(sig)-1];
+  lineChart($('#chCvxPrice'), {label:'Composite price vs parity', x:P.map(p=>p.parity), xfmt:v=>fmtN(v,0), xlabel:'composite parity',
+    series:[{y:P.map(p=>p.price),cls:'a'},{y:P.map(p=>p.parity),cls:'ref'},{y:P.map(p=>p.floor),cls:'ref'}],
+    band:[at(band[0]).parity, at(band[1]).parity],
+    markers:[{x:p0.parity,y:p0.price,label:'today',cls:'now',dx:-8,anchor:'end'},{x:pM.parity,y:pM.price,label:'max convexity',cls:'max',dy:16}],
+    tip:j=>{ const p=P[j]; return `<b>Equity ${fmtS(p.m*100,0)}%</b><div class="num"><span class="muted">Price</span><span>${fmtN(p.price,2)}</span></div><div class="num"><span class="muted">Parity</span><span>${fmtN(p.parity,2)}</span></div><div class="num"><span class="muted">Floor</span><span>${fmtN(p.floor,2)}</span></div><div class="num"><span class="muted">Premium</span><span>${fmtN((p.price/p.parity-1)*100,1)}%</span></div><div class="num"><span class="muted">Delta</span><span>${fmtN(p.delta,1)}%</span></div>`; }});
+  lineChart($('#chCvxDelta'), {label:'Delta vs equity move', x:P.map(p=>p.m*100), xfmt:v=>fmtS(v,0)+'%', xlabel:'equity move', extraY:[0],
+    series:[{y:P.map(p=>p.delta),cls:'a'},{y:P.map(p=>p.net),cls:'b'}], band:band.map(v=>v*100),
+    markers:[{x:0,y:p0.delta,label:fmtN(p0.delta,0)+'%',cls:'now'},{x:pM.m*100,y:pM.delta,label:'max γ',cls:'max',dy:16},{x:0,y:p0.net,label:fmtN(p0.net,1)+'%',cls:'now',dy:16}],
+    tip:j=>{ const p=P[j]; return `<b>Equity ${fmtS(p.m*100,0)}%</b><div class="num"><span class="muted">Composite δ</span><span>${fmtN(p.delta,1)}%</span></div><div class="num"><span class="muted">Gamma</span><span>${fmtN(p.gamma,2)}</span></div><div class="num"><span class="muted">Net delta, % AUM</span><span>${fmtN(p.net,1)}%</span></div>`; }});
+  const sc = [[-0.3],[-0.2],[-0.1],[band[0],'−1σ'],[0],[band[1],'+1σ'],[0.1],[0.2],[0.3]];
+  $('#tblCvx').innerHTML = `<table><thead><tr><th class="l">Equity move</th><th>Composite price</th><th>Composite δ</th><th>CB P&amp;L €</th><th>of which convexity €</th><th>Overlay P&amp;L €</th><th>Total bps</th><th>Net delta % AUM</th><th>Chg pp</th></tr></thead><tbody>${sc.map(([m,l])=>{
+    const p=at(m), cb=p.V-p0.V, lin=p0.cbEq*p.m, tot=cb+p.ovPnl;
+    return `<tr class="${m===0?'tot':''}"><td class="l">${l?`<b>${l}</b> (${fmtS(p.m*100,1)}%)`:fmtS(p.m*100,0)+'%'}</td><td class="num">${fmtN(p.price,2)}</td><td class="num">${fmtN(p.delta,1)}</td><td class="num ${cb<0?'neg':cb>0?'pos':''}">${fmtS(cb,0)}</td><td class="num">${fmtS(cb-lin,0)}</td><td class="num">${fmtS(p.ovPnl,0)}</td><td class="num ${tot<0?'neg':tot>0?'pos':''}">${fmtS(tot/s.aum*1e4,1)}</td><td class="num">${fmtN(p.net,1)}</td><td class="num">${fmtS(p.net-p0.net,1)}</td></tr>`; }).join('')}</tbody></table>`;
+}
 function expoCsv(){
   const cols = ['isin','name','und','strat','ccy','region','sector','mv','mvp','delta','eq','eqp','chg','gamma','vega','cs01','dv01','dur','theta','decay','carry','cs','iv','src'];
   const q = v => v==null?'':(typeof v==='number'?String(Math.round(v*1e6)/1e6):'"'+String(v).replace(/"/g,'""')+'"');
@@ -760,7 +878,7 @@ function render(){
   $('#results').hidden = false; $('#emptyState').hidden = true;
   const {E0,E1,I0,I1} = S.files;
   $('#period').innerHTML = `<span>Period <b>${fmtDate(E0.date)} → ${fmtDate(E1.date)}</b></span><span>Index data <b>${fmtDate(I0.date)} → ${fmtDate(I1.date)}</b></span><span>AUM <b class="num">${fmtEUR(R.aum)} €</b></span><span>Accrual <b>${R.days} d</b></span><span>CBs <b>${R.rows.length}</b></span>`;
-  renderTiles(); renderWaterfall(); renderContrib(); renderExpo(); renderGroups(); renderBonds(); renderOverlay(); renderBench(); renderChecks();
+  renderTiles(); renderWaterfall(); renderContrib(); renderExpo(); renderConvexity(); renderGroups(); renderBonds(); renderOverlay(); renderBench(); renderChecks();
 }
 const bps = v => v/S.res.aum*1e4;
 function renderTiles(){
@@ -952,6 +1070,7 @@ $('#btnCsv').addEventListener('click',()=>{ if(!S.res) return; const b=new Blob(
 $('#btnCopy').addEventListener('click',async()=>{ if(!S.res) return; const t=csv(); try{ await navigator.clipboard.writeText(t); toast('CSV copied to clipboard'); }catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); toast('Select and copy the text'); } });
 $('#unit').addEventListener('change',e=>{ S.unit=e.target.value; renderBonds(); });
 $('#expoGroup').value = load('cbpnl.expoGroup','strat');
+$('#cvxHorizon').addEventListener('change',()=>renderConvexity());
 $('#expoGroup').addEventListener('change',e=>{ store('cbpnl.expoGroup',e.target.value); if (S.res) renderExpoGroup(); });
 $('#btnExpoCsv').addEventListener('click',()=>{ if(!S.res) return; const b=new Blob([expoCsv()],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`cb_exposures_${fmtDate(S.files.E1.date).replace(/ /g,'')}.csv`; document.body.appendChild(a); a.click(); a.remove(); });
 
@@ -962,9 +1081,9 @@ const drop=$('#drop');
 drop.addEventListener('drop',e=>handleFiles(e.dataTransfer.files));
 $('#files').addEventListener('change',e=>{ handleFiles(e.target.files); e.target.value=''; });
 $('#btnClear').addEventListener('click',()=>{ S.parsed=[]; S.res=null; S.overlayS={}; assignSlots(); $('#results').hidden=true; $('#emptyState').hidden=false; $('#period').innerHTML='<span>No period loaded</span>'; });
-$('#tabs').addEventListener('click',e=>{ const b=e.target.closest('.tab'); if(!b) return; document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t===b)); document.querySelectorAll('.view').forEach(v=>v.hidden = v.id!=='view-'+b.dataset.view); store('cbpnl.tab',b.dataset.view); if (S.res){ renderContrib(); renderExpoGroup(); } });
+$('#tabs').addEventListener('click',e=>{ const b=e.target.closest('.tab'); if(!b) return; document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t===b)); document.querySelectorAll('.view').forEach(v=>v.hidden = v.id!=='view-'+b.dataset.view); store('cbpnl.tab',b.dataset.view); if (S.res){ renderContrib(); renderExpoGroup(); renderConvexity(); } });
 (function restoreTab(){ const t=load('cbpnl.tab',null); const b=t&&document.querySelector(`.tab[data-view="${t}"]`); if(b) b.click(); })();
-let rt; addEventListener('resize',()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(S.res){ renderWaterfall(); renderContrib(); renderExpoGroup(); } },150); });
+let rt; addEventListener('resize',()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(S.res){ renderWaterfall(); renderContrib(); renderExpoGroup(); renderConvexity(); } },150); });
 
 /* ===================== sample data (fictitious) ===================== */
 function demo(){
