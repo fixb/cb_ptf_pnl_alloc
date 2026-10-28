@@ -199,6 +199,7 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
       <section class="panel">
         <div class="tabs" role="tablist" id="tabs">
           <button class="tab" role="tab" data-view="contrib" aria-selected="true" type="button">Contributors</button>
+          <button class="tab" role="tab" data-view="expo" type="button">Exposures</button>
           <button class="tab" role="tab" data-view="strategy" type="button">By strategy</button>
           <button class="tab" role="tab" data-view="region" type="button">By region</button>
           <button class="tab" role="tab" data-view="sector" type="button">By sector</button>
@@ -215,6 +216,26 @@ tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
             <div><h3>Bottom 10 contributors</h3><div class="chart" id="chBot"></div></div>
           </div>
           <div class="legend"><span><i style="background:var(--pos)"></i>Positive P&amp;L</span><span><i style="background:var(--neg)"></i>Negative P&amp;L</span><span class="muted">Hover a bar for the component breakdown.</span></div>
+        </div>
+        <div class="view" id="view-expo" hidden style="padding-top:12px">
+          <div class="row" style="justify-content:space-between;margin-bottom:10px">
+            <p class="muted small" id="expoAsOf"></p>
+            <div class="row">
+              <label class="small muted" for="expoGroup">Group by</label>
+              <select id="expoGroup" class="btn"><option value="strat">Strategy</option><option value="region">Index region</option><option value="sector">Index sector</option><option value="ccy">Currency</option><option value="und">Underlying</option></select>
+              <button class="btn" id="btnExpoCsv" type="button">Download CSV</button>
+            </div>
+          </div>
+          <div class="tiles" id="expoTiles"></div>
+          <div class="two" style="margin-top:16px">
+            <div><h3>Net equity delta, % of AUM</h3><div class="chart" id="chExpo" style="margin-top:8px"></div>
+              <div class="legend"><span><i style="background:var(--pos)"></i>Long delta</span><span><i style="background:var(--neg)"></i>Short delta</span><span class="muted">CBs + overlay at T1.</span></div></div>
+            <div><h3>Limits</h3><div class="settings" id="expoLimits" style="margin:8px 0 10px"></div><div id="expoAlerts"></div></div>
+          </div>
+          <div class="tblwrap" id="tblExpoGroup" style="margin-top:16px"></div>
+          <h3 style="margin-top:16px">Positions</h3>
+          <div class="tblwrap" id="tblExpoPos" style="margin-top:6px"></div>
+          <p class="muted small" style="margin-top:6px">Equity delta = δ × parity × nominal, in EUR. Gamma = change in equity delta for a +1% stock move. Vega per vol point, CS01 per +1 bp of spread (index Rho). Greeks from the index file at each date; bonds missing from the index fall back to BgAM delta and parity (no gamma/vega/CS01). Index options and futures enter at their delta-adjusted exposure.</p>
         </div>
         <div class="view" id="view-strategy" hidden style="padding-top:12px"><div class="tblwrap" id="tblStrategy"></div></div>
         <div class="view" id="view-region" hidden style="padding-top:12px"><div class="tblwrap" id="tblRegion"></div></div>
@@ -381,7 +402,7 @@ function detectAndParse(wb, fname){
 }
 
 /* ===================== state ===================== */
-const S = { files:{E0:null,E1:null,I0:null,I1:null}, parsed:[], res:null, sort:{key:'total',dir:-1}, unit:'eur', overlayS:{} };
+const S = { files:{E0:null,E1:null,I0:null,I1:null}, parsed:[], res:null, sort:{key:'total',dir:-1}, expoSort:{key:'eq',dir:-1}, unit:'eur', overlayS:{} };
 
 function assignSlots(){
   const ex = S.parsed.filter(p=>p.kind==='expo').sort((a,b)=>(a.date||0)-(b.date||0));
@@ -551,10 +572,139 @@ function run(){
   const tot = zeroComps(); tot.total=0; let fxtr=0;
   for (const r of rows){ for (const k in r.eur) tot[k]+=r.eur[k]; fxtr+=r.fxtr; }
   const ovlTot = ovl.reduce((a,o)=>a+(o.pnl||0),0);
-  S.res = {rows, tot, fxtr, ovl, ovlTot, bench, aum, days, set, checks, dayAuto};
+  const expo = {s0:expoSnap(E0,I0,E1.aum), s1:expoSnap(E1,I1,E0.aum)};
+  S.res = {rows, tot, fxtr, ovl, ovlTot, bench, aum, days, set, checks, dayAuto, expo};
   render();
 }
 function zeroComps(){ const o={}; for (const [k] of COMPS) o[k]=0; return o; }
+
+/* ===================== exposures ===================== */
+// One snapshot per date: each exposure report with the index file of the same date.
+function expoSnap(E, I, aumAlt){
+  const aum = E.aum || aumAlt || 1, rows = [], regionOf = {};
+  for (const p of Object.values(E.cbs)){
+    const i = I.byIsin[p.isin];
+    const perPt = p.pct ? p.expo/(p.pct*100) : 0; // EUR per price point of the position
+    const par = i&&i.par!=null ? i.par : p.parity;
+    const delta = i&&i.delta!=null ? i.delta : (p.delta!=null ? p.delta*100 : null);
+    const r = {isin:p.isin, name:p.name, und:String(p.und||p.name), strat:p.strat||'—', ccy:(i&&i.ccy)||'EUR', region:(i&&i.region)||'n/a', sector:(i&&i.sector)||'n/a',
+      mv:p.expo, delta, src:i?'index':'BgAM', ovl:0,
+      eq: par!=null&&delta!=null ? perPt*par*delta/100 : 0,
+      gamma: i&&i.gamma!=null&&par!=null ? perPt*par*i.gamma/100 : null,
+      vega: i&&i.vega!=null ? perPt*i.vega : null,
+      cs01: i&&i.rho!=null ? perPt*i.rho/10 : null,
+      cs: i&&i.cs!=null ? i.cs : p.cs, iv: i&&i.iv!=null ? i.iv : (p.iv!=null ? p.iv*100 : null)};
+    rows.push(r);
+    if (p.country && r.region!=='n/a') regionOf[norm(p.country)] = r.region;
+  }
+  const ovl = E.overlay.map(o=>({name:o.name, und:String(o.und||'—'), strat:o.strat||'—', ccy:ccyOfOverlay(o), region:regionOf[norm(o.country)]||'n/a', sector:'Index overlay', eq:o.expo, kind:o.kind}));
+  const tot = {mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0};
+  for (const r of rows){ tot.mv+=r.mv; tot.eq+=r.eq; tot.gamma+=r.gamma||0; tot.vega+=r.vega||0; tot.cs01+=r.cs01||0; if (r.delta!=null) tot.dmv+=r.delta*r.mv; }
+  for (const o of ovl) tot.ovl+=o.eq;
+  tot.net = tot.eq + tot.ovl; tot.avgDelta = tot.mv ? tot.dmv/tot.mv : null;
+  const idx = {region:{}, sector:{}, ccy:{}, w:0, dw:0};
+  for (const b of I.list){ if (!b.w) continue; idx.w+=b.w; if (b.delta!=null) idx.dw+=b.w*b.delta; for (const k of ['region','sector','ccy']){ const g=b[k]||'n/a'; idx[k][g]=(idx[k][g]||0)+b.w; } }
+  idx.avgDelta = idx.w ? idx.dw/idx.w : null;
+  return {aum, rows, ovl, tot, idx, date:E.date};
+}
+const pA = (v,aum) => v/aum*100;
+function expoGroups(snap, key){
+  const g = {};
+  const G = k => g[k] || (g[k] = {k, n:0, mv:0, eq:0, ovl:0, gamma:0, vega:0, cs01:0, dmv:0});
+  for (const r of snap.rows){ const x=G(r[key]||'—'); x.n++; x.mv+=r.mv; x.eq+=r.eq; x.gamma+=r.gamma||0; x.vega+=r.vega||0; x.cs01+=r.cs01||0; if (r.delta!=null) x.dmv+=r.delta*r.mv; }
+  for (const o of snap.ovl){ const x=G(o[key]||'—'); x.ovl+=o.eq; }
+  for (const x of Object.values(g)) x.net = x.eq + x.ovl;
+  return g;
+}
+function expoLimits(){ return load('cbpnl.limits', {netMin:null, netMax:null, posMax:5, undMax:3}); }
+function expoAlerts(snap){
+  const L = expoLimits(), out = [], netP = pA(snap.tot.net, snap.aum);
+  if (L.netMin!=null && netP < L.netMin) out.push(['bad', `Net delta ${fmtN(netP,1)}% below floor ${fmtN(L.netMin,1)}%`]);
+  if (L.netMax!=null && netP > L.netMax) out.push(['bad', `Net delta ${fmtN(netP,1)}% above cap ${fmtN(L.netMax,1)}%`]);
+  if (L.posMax!=null) for (const r of snap.rows){ const v=pA(r.mv,snap.aum); if (v > L.posMax) out.push(['warn', `${r.name}: ${fmtN(v,2)}% of AUM (max ${fmtN(L.posMax,1)}%)`]); }
+  if (L.undMax!=null) for (const x of Object.values(expoGroups(snap,'und'))){ const v=pA(x.net,snap.aum); if (Math.abs(v) > L.undMax) out.push(['warn', `${x.k}: equity delta ${fmtS(v,2)}% of AUM (max ±${fmtN(L.undMax,1)}%)`]); }
+  return out;
+}
+function renderExpo(){
+  const {s0,s1} = S.res.expo, t0=s0.tot, t1=s1.tot;
+  $('#expoAsOf').innerHTML = `As of <b>${fmtDate(s1.date)}</b> · change vs ${fmtDate(s0.date)} · AUM <span class="num">${fmtEUR(s1.aum)} €</span>`;
+  const chg = (v,d,u) => `<span class="${v<0?'neg':v>0?'pos':''}">${fmtS(v,d)}${u}</span> vs T0`;
+  const tP = (k, key, cls='') => { const v1=pA(t1[key],s1.aum), v0=pA(t0[key],s0.aum); return `<div class="tile ${cls}"><span class="k">${k}</span><span class="v">${fmtN(v1,1)}%</span><span class="s">${fmtEUR(t1[key])} € · ${chg(v1-v0,1,' pp')}</span></div>`; };
+  const tS = (k, key, unit) => `<div class="tile"><span class="k">${k}</span><span class="v">${fmtS(t1[key],0)}</span><span class="s">€ ${unit} · ${fmtS(bps(t1[key]),2)} bps · ${chg(t1[key]-t0[key],0,' €')}</span></div>`;
+  $('#expoTiles').innerHTML =
+    tP('Net equity delta','net','hero') + tP('CB equity delta','eq') + tP('Overlay delta','ovl') + tP('CB market value','mv') +
+    `<div class="tile"><span class="k">Avg delta (MV-weighted)</span><span class="v">${fmtN(t1.avgDelta,1)}%</span><span class="s">index ${fmtN(s1.idx.avgDelta,1)}% · ${chg((t1.avgDelta||0)-(t0.avgDelta||0),1,' pp')}</span></div>` +
+    tS('Gamma','gamma','per +1% stocks') + tS('Vega','vega','per vol pt') + tS('CS01','cs01','per +1 bp spread');
+  renderExpoLimits(); renderExpoGroup(); renderExpoPos();
+}
+function renderExpoLimits(){
+  const L = expoLimits();
+  const f = (k,l) => `<div class="field"><label for="lim_${k}">${l}</label><input id="lim_${k}" type="number" step="0.5" data-k="${k}" value="${L[k]??''}" placeholder="off"></div>`;
+  $('#expoLimits').innerHTML = f('netMin','Net delta floor, %') + f('netMax','Net delta cap, %') + f('posMax','Max position, % AUM') + f('undMax','Max delta per underlying, %');
+  $('#expoLimits').querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>{ const L=expoLimits(); L[i.dataset.k]=num(i.value); store('cbpnl.limits',L); renderExpoAlerts(); }));
+  renderExpoAlerts();
+}
+function renderExpoAlerts(){
+  const a = expoAlerts(S.res.expo.s1);
+  $('#expoAlerts').innerHTML = a.length
+    ? `<p class="small" style="margin-bottom:6px"><span class="flag bad">${a.length} breach${a.length>1?'es':''}</span></p><ul class="small" style="margin:0;padding-left:18px;display:grid;gap:3px">${a.map(([c,m])=>`<li class="${c==='bad'?'neg':''}">${esc(m)}</li>`).join('')}</ul>`
+    : '<p class="small"><span class="flag">within limits</span></p>';
+}
+function renderExpoGroup(){
+  const key = $('#expoGroup').value, label = $('#expoGroup').selectedOptions[0].textContent;
+  const {s0,s1} = S.res.expo, g1 = expoGroups(s1,key), g0 = expoGroups(s0,key);
+  const list = Object.values(g1).sort((a,b)=>Math.abs(b.net)-Math.abs(a.net));
+  const idxW = s1.idx[key], cbMv = s1.tot.mv||1;
+  hbars($('#chExpo'), list.slice(0,14).map(x=>({l:x.k, v:pA(x.net,s1.aum),
+    tip:`<b>${esc(x.k)}</b><div class="num"><span class="muted">CB delta</span><span>${fmtS(pA(x.eq,s1.aum),2)}%</span></div><div class="num"><span class="muted">Overlay</span><span>${fmtS(pA(x.ovl,s1.aum),2)}%</span></div><div class="num"><span class="muted">Net, EUR</span><span>${fmtS(x.net,0)}</span></div>`})), 'Net equity delta by group');
+  const T = {k:'Total', n:s1.rows.length, mv:s1.tot.mv, eq:s1.tot.eq, ovl:s1.tot.ovl, net:s1.tot.net, gamma:s1.tot.gamma, vega:s1.tot.vega, cs01:s1.tot.cs01, dmv:s1.tot.dmv};
+  const line = (x, x0, cls='') => {
+    const d = x0 ? pA(x.net,s1.aum)-pA(x0.net,s0.aum) : (cls ? pA(x.net,s1.aum)-pA(s0.tot.net,s0.aum) : pA(x.net,s1.aum));
+    return `<tr class="${cls}"><td class="l">${esc(x.k)}</td><td class="num">${x.n}</td><td class="num">${fmtN(pA(x.mv,s1.aum),2)}</td><td class="num">${fmtN(x.mv/cbMv*100,1)}</td>${idxW?`<td class="num">${cls?'100.0':fmtN(idxW[x.k]!=null?idxW[x.k]/s1.idx.w*100:0,1)}</td>`:''}
+      <td class="num">${x.mv?fmtN(x.dmv/x.mv,1):'—'}</td><td class="num">${fmtS(pA(x.eq,s1.aum),2)}</td><td class="num">${fmtS(pA(x.ovl,s1.aum),2)}</td><td class="num ${x.net<0?'neg':'pos'}">${fmtS(pA(x.net,s1.aum),2)}</td><td class="num">${fmtS(d,2)}</td>
+      <td class="num">${fmtS(x.gamma,0)}</td><td class="num">${fmtS(x.vega,0)}</td><td class="num">${fmtS(x.cs01,0)}</td></tr>`;
+  };
+  $('#tblExpoGroup').innerHTML = `<table><thead><tr><th class="l">${esc(label)}</th><th>#</th><th>MV % AUM</th><th>Wt % CBs</th>${idxW?'<th>Wt % index</th>':''}<th>Avg δ</th><th>CB Δ %</th><th>Overlay Δ %</th><th>Net Δ %</th><th>Chg pp</th><th>Gamma €/1%</th><th>Vega €/pt</th><th>CS01 €/bp</th></tr></thead><tbody>
+    ${list.map(x=>line(x,g0[x.k])).join('')}${line(T,null,'tot')}</tbody></table>`;
+}
+const EXPO_COLS = [
+  ['name','Bond','l'],['und','Underlying','l'],['strat','Strategy','l'],['ccy','Ccy','l'],['mv','MV €','m'],['mvp','MV %','n2'],['delta','δ','n1'],
+  ['eq','Equity Δ €','e'],['eqp','Δ % AUM','n2'],['chg','Chg pp','s2'],['gamma','Gamma €/1%','e'],['vega','Vega €/pt','e'],['cs01','CS01 €/bp','e'],['cs','Spread bp','n0'],['iv','IV','n1'],['flags','Flags','f']
+];
+function expoPosRows(){
+  const {s0,s1} = S.res.expo, L = expoLimits();
+  const by0 = {}; for (const r of s0.rows) by0[r.isin] = r;
+  const seen = new Set(), out = [];
+  for (const r of s1.rows){
+    seen.add(r.isin); const r0 = by0[r.isin], flags = [];
+    if (r.src==='BgAM') flags.push(['BgAM greeks','warn']);
+    if (!r0) flags.push(['new','']);
+    if (L.posMax!=null && pA(r.mv,s1.aum) > L.posMax) flags.push(['size limit','bad']);
+    out.push({...r, mvp:pA(r.mv,s1.aum), eqp:pA(r.eq,s1.aum), chg:pA(r.eq,s1.aum)-(r0?pA(r0.eq,s0.aum):0), flags});
+  }
+  for (const r0 of s0.rows) if (!seen.has(r0.isin)) out.push({...r0, mv:0, eq:0, gamma:null, vega:null, cs01:null, mvp:0, eqp:0, chg:-pA(r0.eq,s0.aum), flags:[['sold','']]});
+  return out;
+}
+function renderExpoPos(){
+  const rows = expoPosRows(), {key,dir} = S.expoSort;
+  rows.sort((a,b)=>{ const x=a[key], y=b[key]; if (typeof x==='string'||typeof y==='string') return String(x||'').localeCompare(String(y||''))*dir; return ((x??-Infinity)-(y??-Infinity))*dir; });
+  const cell = (r,[k,,t]) => {
+    if (t==='l') return `<td class="l">${esc(r[k])}</td>`;
+    if (t==='f') return `<td class="l">${r.flags.map(([f,c])=>`<span class="flag ${c}">${esc(f)}</span>`).join('')}</td>`;
+    if (t==='m') return `<td class="num">${fmtEUR(r[k])}</td>`;
+    if (t==='e') return `<td class="num">${r[k]==null?'—':fmtS(r[k],0)}</td>`;
+    if (t[0]==='s') return `<td class="num ${r[k]<0?'neg':r[k]>0?'pos':''}">${fmtS(r[k],+t[1])}</td>`;
+    return `<td class="num">${fmtN(r[k],+t[1])}</td>`;
+  };
+  const box = $('#tblExpoPos');
+  box.innerHTML = `<table><thead><tr>${EXPO_COLS.map(([k,l,t])=>`<th class="${t==='l'||t==='f'?'l':''}" data-k="${k}" tabindex="0">${l}${key===k?(dir>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${EXPO_COLS.map(c=>cell(r,c)).join('')}</tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('th').forEach(th=>{ const h=()=>{ const k=th.dataset.k; S.expoSort = S.expoSort.key===k ? {key:k,dir:-S.expoSort.dir} : {key:k,dir:-1}; renderExpoPos(); }; th.addEventListener('click',h); th.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();h();}}); });
+}
+function expoCsv(){
+  const cols = ['isin','name','und','strat','ccy','region','sector','mv','mvp','delta','eq','eqp','chg','gamma','vega','cs01','cs','iv','src'];
+  const q = v => v==null?'':(typeof v==='number'?String(Math.round(v*1e6)/1e6):'"'+String(v).replace(/"/g,'""')+'"');
+  return [cols.join(','), ...expoPosRows().map(r=>cols.map(c=>q(r[c])).join(','))].join('\n');
+}
 
 /* ===================== rendering ===================== */
 function render(){
@@ -562,7 +712,7 @@ function render(){
   $('#results').hidden = false; $('#emptyState').hidden = true;
   const {E0,E1,I0,I1} = S.files;
   $('#period').innerHTML = `<span>Period <b>${fmtDate(E0.date)} → ${fmtDate(E1.date)}</b></span><span>Index data <b>${fmtDate(I0.date)} → ${fmtDate(I1.date)}</b></span><span>AUM <b class="num">${fmtEUR(R.aum)} €</b></span><span>Accrual <b>${R.days} d</b></span><span>CBs <b>${R.rows.length}</b></span>`;
-  renderTiles(); renderWaterfall(); renderContrib(); renderGroups(); renderBonds(); renderOverlay(); renderBench(); renderChecks();
+  renderTiles(); renderWaterfall(); renderContrib(); renderExpo(); renderGroups(); renderBonds(); renderOverlay(); renderBench(); renderChecks();
 }
 const bps = v => v/S.res.aum*1e4;
 function renderTiles(){
@@ -753,6 +903,9 @@ function csv(){
 $('#btnCsv').addEventListener('click',()=>{ if(!S.res) return; const b=new Blob([csv()],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`cb_pnl_attribution_${fmtDate(S.files.E1.date).replace(/ /g,'')}.csv`; document.body.appendChild(a); a.click(); a.remove(); toast('If nothing downloaded, use Copy CSV.'); });
 $('#btnCopy').addEventListener('click',async()=>{ if(!S.res) return; const t=csv(); try{ await navigator.clipboard.writeText(t); toast('CSV copied to clipboard'); }catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); toast('Select and copy the text'); } });
 $('#unit').addEventListener('change',e=>{ S.unit=e.target.value; renderBonds(); });
+$('#expoGroup').value = load('cbpnl.expoGroup','strat');
+$('#expoGroup').addEventListener('change',e=>{ store('cbpnl.expoGroup',e.target.value); if (S.res) renderExpoGroup(); });
+$('#btnExpoCsv').addEventListener('click',()=>{ if(!S.res) return; const b=new Blob([expoCsv()],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`cb_exposures_${fmtDate(S.files.E1.date).replace(/ /g,'')}.csv`; document.body.appendChild(a); a.click(); a.remove(); });
 
 /* ===================== UI wiring ===================== */
 const drop=$('#drop');
@@ -761,9 +914,9 @@ const drop=$('#drop');
 drop.addEventListener('drop',e=>handleFiles(e.dataTransfer.files));
 $('#files').addEventListener('change',e=>{ handleFiles(e.target.files); e.target.value=''; });
 $('#btnClear').addEventListener('click',()=>{ S.parsed=[]; S.res=null; S.overlayS={}; assignSlots(); $('#results').hidden=true; $('#emptyState').hidden=false; $('#period').innerHTML='<span>No period loaded</span>'; });
-$('#tabs').addEventListener('click',e=>{ const b=e.target.closest('.tab'); if(!b) return; document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t===b)); document.querySelectorAll('.view').forEach(v=>v.hidden = v.id!=='view-'+b.dataset.view); store('cbpnl.tab',b.dataset.view); if (S.res){ renderContrib(); } });
+$('#tabs').addEventListener('click',e=>{ const b=e.target.closest('.tab'); if(!b) return; document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t===b)); document.querySelectorAll('.view').forEach(v=>v.hidden = v.id!=='view-'+b.dataset.view); store('cbpnl.tab',b.dataset.view); if (S.res){ renderContrib(); renderExpoGroup(); } });
 (function restoreTab(){ const t=load('cbpnl.tab',null); const b=t&&document.querySelector(`.tab[data-view="${t}"]`); if(b) b.click(); })();
-let rt; addEventListener('resize',()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(S.res){ renderWaterfall(); renderContrib(); } },150); });
+let rt; addEventListener('resize',()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(S.res){ renderWaterfall(); renderContrib(); renderExpoGroup(); } },150); });
 
 /* ===================== sample data (fictitious) ===================== */
 function demo(){
