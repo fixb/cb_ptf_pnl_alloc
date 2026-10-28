@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CB P&L Attribution</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+/* Layout: one column of panels on a near-black ground; summary tiles + waterfall first, tabbed detail below. Dark-first (house style), light variant kept legible. */
+:root{
+  --bg:#0f1013; --panel:#171920; --panel2:#1d2028; --line:#2a2e38; --fg:#e9e7e1; --muted:#8e929c; --faint:#5c606a;
+  --accent:#f0a93a; --accent-ink:#1a1206; --pos:#5cb77c; --neg:#e2655b; --info:#6ea8e3;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){ :root:not([data-theme="dark"]){
+  --bg:#f5f4f0; --panel:#ffffff; --panel2:#f0efea; --line:#dedbd2; --fg:#1c1d22; --muted:#676b76; --faint:#9a9ea8;
+  --accent:#b57514; --accent-ink:#fff8ea; --pos:#2f8f4e; --neg:#c6463b; --info:#2f6fb5; color-scheme:light; } }
+:root[data-theme="light"]{
+  --bg:#f5f4f0; --panel:#ffffff; --panel2:#f0efea; --line:#dedbd2; --fg:#1c1d22; --muted:#676b76; --faint:#9a9ea8;
+  --accent:#b57514; --accent-ink:#fff8ea; --pos:#2f8f4e; --neg:#c6463b; --info:#2f6fb5; color-scheme:light; }
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;line-height:1.45;
+  padding-block:0 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+h1,h2,h3{margin:0;font-weight:600;text-wrap:balance}
+h1{font-size:20px;letter-spacing:-.01em}
+h2{font-size:15px}
+h3{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:500}
+p{margin:0}
+a{color:var(--info)}
+button,input,select{font:inherit;color:inherit}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:12px}
+.pos{color:var(--pos)} .neg{color:var(--neg)}
+.wrap{max-width:1480px;margin:0 auto;display:grid;gap:16px}
+
+header.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;padding-block:18px 4px;border-bottom:1px solid var(--line)}
+header.top .brand{display:flex;flex-direction:column;gap:2px}
+header.top .brand .eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.period{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12px;color:var(--muted)}
+.period b{color:var(--fg);font-weight:500}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px 16px;min-width:0}
+.panel.head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px}
+
+/* file slots */
+.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.slot{border:1px dashed var(--line);border-radius:6px;padding:10px 12px;display:grid;gap:3px;background:var(--panel2);min-width:0}
+.slot .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.slot .v{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot .d{font-size:12px;color:var(--muted)}
+.slot.ok{border-style:solid;border-color:var(--accent)}
+.drop{border:1px dashed var(--line);border-radius:6px;padding:14px;text-align:center;color:var(--muted);transition:border-color .15s,background .15s}
+.drop.over{border-color:var(--accent);background:var(--panel2)}
+.drop input{display:none}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:6px 12px;cursor:pointer;font-size:13px}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600}
+.btn:focus-visible,input:focus-visible,select:focus-visible,.tab:focus-visible,th[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+
+/* settings */
+.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px 20px}
+.field{display:grid;gap:4px;min-width:0}
+.field label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.field select,.field input{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:5px 8px;width:100%;min-width:0}
+.rates{display:flex;flex-wrap:wrap;gap:6px}
+.rates label{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted)}
+.rates input{width:64px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:4px 6px;font-family:var(--mono);font-size:12px}
+
+/* tiles */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;display:grid;gap:2px;min-width:0}
+.tile .k{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.tile .v{font-family:var(--mono);font-size:22px;font-weight:500;line-height:1.1}
+.tile .s{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.tile.hero{border-color:var(--accent)}
+.tile.hero .k{color:var(--accent)}
+
+/* tabs */
+.tabs{display:flex;flex-wrap:wrap;gap:4px;border-bottom:1px solid var(--line);padding-bottom:6px}
+.tab{background:none;border:1px solid transparent;border-radius:4px;padding:5px 10px;cursor:pointer;color:var(--muted);font-size:13px}
+.tab[aria-selected="true"]{color:var(--fg);background:var(--panel2);border-color:var(--line)}
+.view[hidden]{display:none}
+
+/* tables */
+.tblwrap{overflow-x:auto;max-width:100%}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+th{font-weight:500;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase;position:sticky;top:0;background:var(--panel);cursor:pointer;user-select:none}
+th.l,td.l{text-align:left}
+td.num{font-family:var(--mono)}
+tr.tot td{font-weight:600;border-top:2px solid var(--line);background:var(--panel2)}
+tr:hover td{background:color-mix(in srgb,var(--panel2) 70%,transparent)}
+.bar{display:inline-block;height:9px;border-radius:2px;vertical-align:middle}
+.flag{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:10px;border:1px solid var(--line);color:var(--muted);margin-right:3px;white-space:nowrap}
+.flag.warn{border-color:var(--accent);color:var(--accent)}
+.flag.bad{border-color:var(--neg);color:var(--neg)}
+.tdin{width:90px;background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:3px 6px;font-family:var(--mono);font-size:12px;text-align:right}
+
+/* charts */
+.chart{width:100%;position:relative}
+.chart svg{width:100%;height:auto;display:block;overflow:visible}
+.chart text{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+.chart text.lab{fill:var(--fg)}
+.chart text.cat{font-family:var(--font);font-size:11.5px}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .zero{stroke:var(--muted);stroke-width:1}
+.chart .conn{stroke:var(--faint);stroke-width:1;stroke-dasharray:3 3}
+.chart rect.up{fill:var(--pos)} .chart rect.dn{fill:var(--neg)} .chart rect.tot{fill:var(--accent)}
+.chart rect.hit{fill:transparent;cursor:default}
+.chart rect.hit:hover + rect{filter:brightness(1.15)}
+.tip{position:fixed;z-index:20;pointer-events:none;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:8px 10px;font-size:12px;max-width:280px;box-shadow:0 6px 20px rgba(0,0,0,.35);display:none}
+.tip b{display:block;margin-bottom:4px}
+.tip .num{display:flex;justify-content:space-between;gap:12px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:900px){.two{grid-template-columns:1fr}}
+.empty{display:grid;gap:14px;max-width:70ch}
+.empty ol{margin:0;padding-left:20px;display:grid;gap:6px}
+.method{max-width:78ch;display:grid;gap:10px}
+.method dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:0}
+.method dt{font-family:var(--mono);color:var(--accent);white-space:nowrap}
+.method dd{margin:0}
+.method code{font-family:var(--mono);font-size:12px;background:var(--panel2);padding:1px 4px;border-radius:3px}
+.note{font-size:12px;color:var(--muted);border-left:2px solid var(--accent);padding-left:10px}
+.toast{position:fixed;bottom:calc(16px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);padding:8px 14px;border-radius:5px;font-size:13px;display:none;z-index:30}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <span class="eyebrow">BG Convertible · daily attribution</span>
+      <h1>CB P&amp;L Attribution</h1>
+      <p class="muted small">Portfolio P&amp;L explained with FTSE Global Convertible index market data (delta, gamma, vega, credit, rates, carry).</p>
+    </div>
+    <div class="period" id="period"><span>No period loaded</span></div>
+  </header>
+
+  <section class="panel" id="loader">
+    <div class="head">
+      <h2>Input files</h2>
+      <div class="row">
+        <button class="btn" id="btnDemo" type="button">Load sample data</button>
+        <button class="btn" id="btnClear" type="button">Clear</button>
+      </div>
+    </div>
+    <div class="drop" id="drop">
+      <label for="files" style="cursor:pointer;display:block">Drop the four files here (two BgAM exposure reports .xlsx, two UCBINDEX .xls) or <u>browse</u>. Files are detected and paired by date automatically; nothing leaves your browser.</label>
+      <input id="files" type="file" multiple accept=".xls,.xlsx">
+    </div>
+    <div class="slots" style="margin-top:10px">
+      <div class="slot" id="slotE0"><span class="k">Exposure · T0</span><span class="v">—</span><span class="d">BgAM Exposure Report</span></div>
+      <div class="slot" id="slotE1"><span class="k">Exposure · T1</span><span class="v">—</span><span class="d">BgAM Exposure Report</span></div>
+      <div class="slot" id="slotI0"><span class="k">Index · T0</span><span class="v">—</span><span class="d">UCBINDEX constituent file</span></div>
+      <div class="slot" id="slotI1"><span class="k">Index · T1</span><span class="v">—</span><span class="d">UCBINDEX constituent file</span></div>
+    </div>
+    <p class="muted small" style="margin-top:8px" id="loadmsg"></p>
+  </section>
+
+  <section class="panel" id="settingsPanel">
+    <div class="head"><h2>Settings</h2><span class="muted small">Greeks are taken from the index file at T0 unless set otherwise.</span></div>
+    <div class="settings">
+      <div class="field"><label for="setGreeks">Greeks</label>
+        <select id="setGreeks"><option value="t0">Start of period (T0)</option><option value="mid">Midpoint (average T0/T1)</option></select></div>
+      <div class="field"><label for="setGamma">Gamma</label>
+        <select id="setGamma"><option value="model">Model: ½ · Γ · parity · r²</option><option value="realized">Realized: ½ · Δδ · Δparity</option></select></div>
+      <div class="field"><label for="setFx">EUR conversion</label>
+        <select id="setFx"><option value="t1">Spot at T1</option><option value="t0">Spot at T0</option></select></div>
+      <div class="field"><label for="setIv">Ignore IV moves above (vol pts)</label>
+        <input id="setIv" type="number" value="15" min="0" step="1"></div>
+      <div class="field"><label for="setDays">Accrual days (auto from dates)</label>
+        <input id="setDays" type="number" min="0" step="1" placeholder="auto"></div>
+      <div class="field" style="grid-column:1/-1"><label>Rate moves over the period, bp (applied through Rho)</label>
+        <div class="rates" id="rates"></div></div>
+    </div>
+  </section>
+
+  <section id="results" hidden>
+    <div class="wrap" style="gap:16px">
+      <div class="tiles" id="tiles"></div>
+
+      <section class="panel">
+        <div class="head"><h2>Waterfall · portfolio P&amp;L in bps of AUM</h2><span class="muted small" id="wfNote"></span></div>
+        <div class="chart" id="waterfall"></div>
+      </section>
+
+      <section class="panel">
+        <div class="tabs" role="tablist" id="tabs">
+          <button class="tab" role="tab" data-view="contrib" aria-selected="true" type="button">Contributors</button>
+          <button class="tab" role="tab" data-view="strategy" type="button">By strategy</button>
+          <button class="tab" role="tab" data-view="region" type="button">By region</button>
+          <button class="tab" role="tab" data-view="sector" type="button">By sector</button>
+          <button class="tab" role="tab" data-view="bonds" type="button">Bonds</button>
+          <button class="tab" role="tab" data-view="overlay" type="button">Overlay</button>
+          <button class="tab" role="tab" data-view="bench" type="button">Index benchmark</button>
+          <button class="tab" role="tab" data-view="checks" type="button">Data checks</button>
+          <button class="tab" role="tab" data-view="method" type="button">Method</button>
+        </div>
+
+        <div class="view" id="view-contrib" style="padding-top:12px">
+          <div class="two">
+            <div><h3>Top 10 contributors</h3><div class="chart" id="chTop"></div></div>
+            <div><h3>Bottom 10 contributors</h3><div class="chart" id="chBot"></div></div>
+          </div>
+          <div class="legend"><span><i style="background:var(--pos)"></i>Positive P&amp;L</span><span><i style="background:var(--neg)"></i>Negative P&amp;L</span><span class="muted">Hover a bar for the component breakdown.</span></div>
+        </div>
+        <div class="view" id="view-strategy" hidden style="padding-top:12px"><div class="tblwrap" id="tblStrategy"></div></div>
+        <div class="view" id="view-region" hidden style="padding-top:12px"><div class="tblwrap" id="tblRegion"></div></div>
+        <div class="view" id="view-sector" hidden style="padding-top:12px"><div class="tblwrap" id="tblSector"></div></div>
+        <div class="view" id="view-bonds" hidden style="padding-top:12px">
+          <div class="row" style="justify-content:space-between;margin-bottom:8px">
+            <div class="row">
+              <label class="small muted" for="unit">Units</label>
+              <select id="unit" class="btn"><option value="eur">EUR</option><option value="bps">bps of AUM</option><option value="pts">Price points</option></select>
+            </div>
+            <div class="row"><button class="btn" id="btnCsv" type="button">Download CSV</button><button class="btn" id="btnCopy" type="button">Copy CSV</button></div>
+          </div>
+          <div class="tblwrap" id="tblBonds"></div>
+        </div>
+        <div class="view" id="view-overlay" hidden style="padding-top:12px">
+          <p class="note" style="margin-bottom:10px">Index options and futures carry a delta-adjusted exposure in the report, so their P&amp;L needs the underlying level at T0 (and at T1 for the delta/other split). Futures are priced from the report directly. S&amp;P underlyings are pre-filled from the ES future as a proxy; edit the cells.</p>
+          <div class="tblwrap" id="tblOverlay"></div>
+        </div>
+        <div class="view" id="view-bench" hidden style="padding-top:12px">
+          <p class="note" style="margin-bottom:10px">Same decomposition applied to every constituent of the index file, weighted by index weight at T0, in local currency on clean prices plus coupon accrual. Approximates the index's hedged return; constituents missing on one date are dropped.</p>
+          <div class="tblwrap" id="tblBench"></div>
+        </div>
+        <div class="view" id="view-checks" hidden style="padding-top:12px"><div id="checks"></div></div>
+        <div class="view" id="view-method" hidden style="padding-top:12px">
+          <div class="method">
+            <p>For each convertible held at T0, nominal in bond currency is recovered from the exposure report (<code>N = Exposure / Price% × EUR-ccy spot</code>). The dirty-price move from the fund's own valuation gives the P&amp;L; the clean-price move in the index file is explained with the index greeks; the two are reconciled through carry and a pricing-basis term, so every line sums exactly to the valuation P&amp;L.</p>
+            <dl>
+              <dt>Equity</dt><dd><code>δ × Parity₀ × (S₁/S₀ − 1)</code> — stock move in its own currency.</dd>
+              <dt>Equity FX</dt><dd><code>δ × ΔParity − Equity</code> — the part of the parity move not explained by the stock (cross-currency bonds, ratio adjustments).</dd>
+              <dt>Gamma</dt><dd>Model: <code>½ × Γ × Parity₀ × r²</code> with Γ the index gamma (delta points per 1% parity move) and r the parity return. Realized alternative: <code>½ × (δ₁ − δ₀) × ΔParity</code>.</dd>
+              <dt>Vega</dt><dd><code>Vega × ΔIV</code> (price points per vol point). Ignored when IV is missing on either date or moves by more than the threshold, which usually signals a model re-calibration on a low-delta bond.</dd>
+              <dt>Credit</dt><dd><code>ΔSpread/10 × Rho(10bp)</code>. Rho is the discount-rate sensitivity of the index model and is used as the spread proxy.</dd>
+              <dt>Rates</dt><dd><code>Δr/10 × Rho(10bp)</code>, with Δr per currency from the settings (default 0).</dd>
+              <dt>Carry</dt><dd>Coupon accrual, <code>coupon × days/365</code>; the index clean price excludes it, the fund's dirty price includes it.</dd>
+              <dt>Residual</dt><dd>Index clean-price move minus the explained components: theta, bond-floor accretion, cross terms and index pricing noise.</dd>
+              <dt>Pricing basis</dt><dd>Fund clean-price move minus index clean-price move: the difference between the two pricing sources (time of snapshot, dealer marks).</dd>
+              <dt>FX translation</dt><dd><code>N₀ × Dirty₀ × (1/FX₁ − 1/FX₀)</code>, shown as a memo only: positions are FX-hedged with forwards, so it is excluded from attributed P&amp;L.</dd>
+              <dt>Trades</dt><dd>A change in nominal between T0 and T1 is assumed to trade at the T1 price (zero P&amp;L on the traded quantity) and flagged. A position sold in full uses the index price at T1 as exit proxy.</dd>
+            </dl>
+            <p class="muted small">Units: the index file quotes the bond price in % of par, parity in bond-currency points, delta in %, spread in bp, Vega per vol point, Rho per 10 bp. AUM is derived from the exposure report's total line (exposure ÷ % of AUM). The "T0/T1" labels follow the file dates; both sources published on the same date reflect the same close.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section class="panel empty" id="emptyState">
+    <h2>How it works</h2>
+    <ol>
+      <li>Drop two <b>BgAM Exposure Reports</b> (consecutive dates) and the two <b>UCBINDEX</b> constituent files for the same dates.</li>
+      <li>Positions are matched to the index by ISIN (RegS, 144A and registered lines included), nominals are recovered from exposure ÷ price.</li>
+      <li>Valuation P&amp;L is split into equity, gamma, vega, credit, rates, carry, residual and pricing basis; index options and futures sit in a separate overlay bucket.</li>
+      <li>The same decomposition on the whole index gives a benchmark line to compare against.</li>
+    </ol>
+    <p class="muted small">No data is uploaded anywhere; parsing and calculation run in the page. Use "Load sample data" to see the layout with a fictitious five-bond book.</p>
+  </section>
+</div>
+<div class="tip" id="tip"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===================== utils ===================== */
+const $ = s => document.querySelector(s);
+const fmtEUR = v => (v<0?'−':'') + Math.abs(Math.round(v)).toLocaleString('en-GB').replace(/,/g,' ');
+const fmtN = (v,d=1) => v==null||isNaN(v) ? '—' : (v<0?'−':'') + Math.abs(v).toLocaleString('en-GB',{minimumFractionDigits:d,maximumFractionDigits:d}).replace(/,/g,' ');
+const fmtS = (v,d=1) => v==null||isNaN(v) ? '—' : (v>0?'+':v<0?'−':'') + Math.abs(v).toLocaleString('en-GB',{minimumFractionDigits:d,maximumFractionDigits:d}).replace(/,/g,' ');
+const fmtDate = d => d ? d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const norm = s => String(s==null?'':s).toLowerCase().replace(/\s+/g,' ').trim();
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const num = v => (typeof v==='number' && isFinite(v)) ? v : (v!=null && v!=='' && !isNaN(+v) ? +v : null);
+const COMPS = [
+  ['eq','Equity'],['eqfx','Equity FX'],['gamma','Gamma'],['vega','Vega'],['credit','Credit'],['rates','Rates'],
+  ['carry','Carry'],['resid','Residual'],['basis','Pricing basis']
+];
+const CCY_BY_COUNTRY = {'united states of america':'USD','united states':'USD','us':'USD','japan':'JPY','hong kong':'HKD','china':'USD','united kingdom':'GBP','switzerland':'CHF','sweden':'SEK','norway':'NOK','denmark':'DKK','canada':'CAD','australia':'AUD','taiwan':'TWD','singapore':'USD'};
+const RATE_CCYS = ['USD','EUR','JPY','HKD','GBP','CHF'];
+
+function toast(m){ const t=$('#toast'); t.textContent=m; t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none',2200); }
+function store(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+function load(k,d){ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v);}catch(e){return d;} }
+
+/* ===================== parsing ===================== */
+function findCol(hdr, ...needles){
+  for (const n of needles){
+    const i = hdr.findIndex(h => norm(h).startsWith(norm(n)));
+    if (i>=0) return i;
+  }
+  return -1;
+}
+function parseExposure(rows, fname){
+  let title = '', date = null;
+  for (let i=0;i<5;i++){ const c = rows[i]&&rows[i][0]; const m = c && String(c).match(/(\d{2})\/(\d{2})\/(\d{4})/); if (m){ title=String(c); date=new Date(Date.UTC(+m[3],+m[2]-1,+m[1])); break; } }
+  const hi = rows.findIndex(r => r && r.some(c => norm(c)==='allotment'));
+  if (hi<0) throw new Error(fname+': header row with "Allotment" not found');
+  const hdr = rows[hi];
+  const c = {
+    allot: findCol(hdr,'allotment'), strat: findCol(hdr,'strategy'), book: findCol(hdr,'portfolio'),
+    inst: findCol(hdr,'instrument'), und: findCol(hdr,'underlying'), expo: findCol(hdr,'pure exposure'),
+    bics: findCol(hdr,'sector bics'), country: findCol(hdr,'sector country'), bbg: findCol(hdr,'ext:ref (instrument) => bloomberg'),
+    isin: findCol(hdr,'ext:ref (instrument) => isin'), cs: findCol(hdr,'credit spread'), delta: findCol(hdr,'delta in percent'),
+    iv: findCol(hdr,'implied volatility'), parity: findCol(hdr,'parity'), ytm: findCol(hdr,'yield to maturity'),
+    px: findCol(hdr,'price (eod)'), pct: findCol(hdr,'price in percent'), dur: findCol(hdr,'duration')
+  };
+  // the % of AUM block: second "pure exposure" header; Net = expo+3 when Long/Short/Net split exists
+  const pctCols = hdr.map((h,i)=>norm(h).startsWith('pure exposure')?i:-1).filter(i=>i>=0);
+  const netPctCol = pctCols.length>1 ? pctCols[1]+2 : -1;
+  if (c.allot<0||c.expo<0||c.pct<0||c.isin<0) throw new Error(fname+': expected exposure-report columns not found');
+  const fx = {}; const cbs = {}; const overlay = []; let aum = null;
+  for (let i=hi+1;i<rows.length;i++){
+    const r = rows[i]; if (!r) continue;
+    if (norm(r[0])==='total'){ const e=num(r[c.expo]); const p = netPctCol>=0 ? num(r[netPctCol]) : null; if (e&&p) aum = e/p; continue; }
+    const allot = norm(r[c.allot]);
+    if (allot==='fx'){ const inst=String(r[c.inst]||'').trim(); const px=num(r[c.px]); if (/^[A-Z]{3}\/[A-Z]{3}$/.test(inst) && px) fx[inst]=px; continue; }
+    if (allot==='cbs'){
+      const isin = String(r[c.isin]||'').trim(); if (!isin) continue;
+      const d = cbs[isin] || (cbs[isin] = {isin, name:String(r[c.inst]||'').trim(), und:r[c.und], strat:r[c.strat], book:r[c.book], bics:r[c.bics], country:r[c.country], expo:0,
+        pct:num(r[c.pct]), px:num(r[c.px]), delta:num(r[c.delta]), iv:num(r[c.iv]), parity:num(r[c.parity]), cs:num(r[c.cs]), dur:num(r[c.dur]), ytm:num(r[c.ytm])});
+      d.expo += num(r[c.expo])||0;
+    } else if (allot==='lst options' || allot==='futures' || allot==='options'){
+      overlay.push({name:String(r[c.inst]||'').trim(), und:r[c.und], strat:r[c.strat], kind:allot==='futures'?'Future':'Option', expo:num(r[c.expo])||0,
+        delta:num(r[c.delta]), px:num(r[c.px]), iv:num(r[c.iv]), tick:r[c.bbg], country:r[c.country]});
+    }
+  }
+  if (!aum){ // fallback: sum CB exposure / sum pct — approximate
+    aum = null;
+  }
+  return {kind:'expo', title, date, fx, aum, cbs, overlay, fname};
+}
+function parseIndex(rows, fname){
+  let asof = null;
+  for (const r of rows){ if (!r) continue; for (const cell of r){ const m = cell && String(cell).match(/Data as of\s+\d{1,2}:\d{2}\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/); if (m){ const mo=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].toLowerCase()); asof=new Date(Date.UTC(+m[3],mo,+m[1])); break; } } if (asof) break; }
+  const hi = rows.findIndex(r => r && norm(r[0])==='mace id');
+  if (hi<0) throw new Error(fname+': "MACE ID" header not found');
+  const hdr = rows[hi];
+  const c = {
+    mace:0, isin:findCol(hdr,'isin'), name:findCol(hdr,'issue'), cpn:findCol(hdr,'coupon'), ccy:findCol(hdr,'bond currency'),
+    P:findCol(hdr,'convertible price'), S:findCol(hdr,'equity price'), par:findCol(hdr,'parity'), delta:findCol(hdr,'delta'),
+    cs:findCol(hdr,'credit spread'), inv:findCol(hdr,'inv value'), ytm:findCol(hdr,'yield to mat'), dur:findCol(hdr,'duration'),
+    w:findCol(hdr,'index weight'), region:findCol(hdr,'region'), sector:findCol(hdr,'sector'), country:findCol(hdr,'country'),
+    iv:findCol(hdr,'implied vol'), gamma:findCol(hdr,'gamma'), rho:findCol(hdr,'rho'), vega:findCol(hdr,'vega'), chi:findCol(hdr,'chi'),
+    ric:findCol(hdr,'ric code'), regs:findCol(hdr,'isin regulation s'), a144:findCol(hdr,'isin 144a'), reg:findCol(hdr,'isin registered')
+  };
+  const byIsin = {}, list = [];
+  for (let i=hi+1;i<rows.length;i++){
+    const r = rows[i]; if (!r || num(r[0])==null) continue;
+    const rec = {mace:r[0], isin:r[c.isin], name:r[c.name], cpn:num(r[c.cpn]), ccy:r[c.ccy], P:num(r[c.P]), S:num(r[c.S]), par:num(r[c.par]), delta:num(r[c.delta]),
+      cs:num(r[c.cs]), inv:num(r[c.inv]), ytm:num(r[c.ytm]), dur:num(r[c.dur]), w:num(r[c.w]), region:r[c.region], sector:r[c.sector], country:r[c.country],
+      iv:num(r[c.iv]), gamma:num(r[c.gamma]), rho:num(r[c.rho]), vega:num(r[c.vega]), chi:num(r[c.chi]), ric:r[c.ric]};
+    list.push(rec);
+    for (const k of [c.isin,c.regs,c.a144,c.reg]) if (k>=0 && r[k]) byIsin[String(r[k]).trim()] = rec;
+  }
+  return {kind:'index', date:asof, byIsin, list, fname};
+}
+function detectAndParse(wb, fname){
+  const names = wb.SheetNames;
+  const idxSheet = names.find(n=>/index/i.test(n)) || names[0];
+  const rows0 = XLSX.utils.sheet_to_json(wb.Sheets[names[0]], {header:1, raw:true});
+  const flat = rows0.slice(0,12).flat().map(norm).join(' | ');
+  if (/mace id|data as of/.test(flat) || (idxSheet!==names[0] && /mace id/.test(XLSX.utils.sheet_to_json(wb.Sheets[idxSheet],{header:1,raw:true}).slice(0,12).flat().map(norm).join(' ')))){
+    return parseIndex(XLSX.utils.sheet_to_json(wb.Sheets[idxSheet],{header:1,raw:true}), fname);
+  }
+  if (/exposure|allotment|portfolio/.test(flat)) return parseExposure(rows0, fname);
+  throw new Error(fname+': not recognised as an exposure report or an index file');
+}
+
+/* ===================== state ===================== */
+const S = { files:{E0:null,E1:null,I0:null,I1:null}, parsed:[], res:null, sort:{key:'total',dir:-1}, unit:'eur', overlayS:{} };
+
+function assignSlots(){
+  const ex = S.parsed.filter(p=>p.kind==='expo').sort((a,b)=>(a.date||0)-(b.date||0));
+  const ix = S.parsed.filter(p=>p.kind==='index').sort((a,b)=>(a.date||0)-(b.date||0));
+  S.files.E0 = ex.length>=2 ? ex[ex.length-2] : (ex[0]||null); S.files.E1 = ex.length>=2 ? ex[ex.length-1] : null;
+  S.files.I0 = ix.length>=2 ? ix[ix.length-2] : (ix[0]||null); S.files.I1 = ix.length>=2 ? ix[ix.length-1] : null;
+  for (const k of ['E0','E1','I0','I1']){
+    const el = $('#slot'+k), f = S.files[k];
+    el.classList.toggle('ok', !!f);
+    el.querySelector('.v').textContent = f ? f.fname : '—';
+    el.querySelector('.d').textContent = f ? (f.kind==='expo' ? ('Report date '+fmtDate(f.date)) : ('Data as of '+fmtDate(f.date))) : (k[0]==='E'?'BgAM Exposure Report':'UCBINDEX constituent file');
+  }
+  const ok = S.files.E0 && S.files.E1 && S.files.I0 && S.files.I1;
+  $('#loadmsg').textContent = ok ? '' : `Loaded ${ex.length}/2 exposure reports and ${ix.length}/2 index files.`;
+  if (ok) run();
+}
+
+async function handleFiles(fileList){
+  const files = Array.from(fileList);
+  if (!window.XLSX){ toast('Spreadsheet parser not loaded (offline?).'); return; }
+  for (const f of files){
+    try{
+      const buf = await f.arrayBuffer();
+      const wb = XLSX.read(buf, {type:'array', cellDates:false});
+      const p = detectAndParse(wb, f.name);
+      S.parsed = S.parsed.filter(q => !(q.kind===p.kind && q.date && p.date && q.date.getTime()===p.date.getTime()));
+      S.parsed.push(p);
+    }catch(e){ console.error(e); toast(String(e.message||e)); }
+  }
+  assignSlots();
+}
+
+/* ===================== settings ===================== */
+function settings(){
+  const rates = {}; document.querySelectorAll('#rates input').forEach(i => rates[i.dataset.ccy] = num(i.value)||0);
+  const s = { greeks:$('#setGreeks').value, gamma:$('#setGamma').value, fx:$('#setFx').value, ivGuard:num($('#setIv').value)??15, days:num($('#setDays').value), rates };
+  store('cbpnl.settings', s); return s;
+}
+function buildRates(extra=[]){
+  const box = $('#rates'); const saved = load('cbpnl.settings',{}).rates||{};
+  const ccys = [...new Set([...RATE_CCYS, ...extra])];
+  box.innerHTML = ccys.map(c=>`<label>${c}<input type="number" step="1" data-ccy="${c}" id="rate_${c}" value="${saved[c]||0}"></label>`).join('');
+  box.querySelectorAll('input').forEach(i=>i.addEventListener('change',()=>run()));
+}
+(function initSettings(){
+  const s = load('cbpnl.settings',{});
+  if (s.greeks) $('#setGreeks').value=s.greeks; if (s.gamma) $('#setGamma').value=s.gamma; if (s.fx) $('#setFx').value=s.fx; if (s.ivGuard!=null) $('#setIv').value=s.ivGuard;
+  buildRates();
+  ['#setGreeks','#setGamma','#setFx','#setIv','#setDays'].forEach(id=>$(id).addEventListener('change',()=>run()));
+})();
+
+/* ===================== computation ===================== */
+function fxRate(E, ccy){ if (ccy==='EUR') return 1; const k='EUR/'+ccy; if (E.fx[k]) return E.fx[k]; const inv=E.fx[ccy+'/EUR']; if (inv) return 1/inv; return null; }
+function ccyOfOverlay(o){ const t=norm(o.name)+' '+norm(o.und); if (/spx|s&p|ndx|nasdaq|russell|rty/.test(t)) return 'USD'; return CCY_BY_COUNTRY[norm(o.country)] || 'EUR'; }
+
+function decompose(i0, i1, set, days){
+  // returns components in price points for the index clean price move; null entries where data missing
+  const flags = [];
+  const g = (k) => set.greeks==='mid' && i1[k]!=null && i0[k]!=null ? (i0[k]+i1[k])/2 : i0[k];
+  const delta = g('delta'), vega = g('vega'), rho = g('rho'), gam = i0.gamma;
+  const dP = i1.P - i0.P;
+  const rS = (i0.S && i1.S) ? i1.S/i0.S - 1 : null;
+  const dPar = i1.par - i0.par, rPar = i0.par ? i1.par/i0.par - 1 : 0;
+  const eq = rS!=null && delta!=null ? delta/100 * i0.par * rS : 0;
+  const eqfx = delta!=null ? delta/100 * dPar - eq : 0;
+  let gamma = 0;
+  if (set.gamma==='realized') gamma = i1.delta!=null && i0.delta!=null ? 0.5*(i1.delta-i0.delta)/100*dPar : 0;
+  else gamma = gam!=null ? 0.5*gam*i0.par*rPar*rPar : 0;
+  let vg = 0;
+  if (i0.iv==null || i1.iv==null){ flags.push(['IV n/a','']); }
+  else { const dIV = i1.iv - i0.iv; if (Math.abs(dIV) > set.ivGuard){ flags.push([`IV jump ${fmtS(dIV,1)} ignored`,'warn']); } else vg = (vega||0) * dIV; }
+  const dCS = (i1.cs!=null && i0.cs!=null) ? i1.cs - i0.cs : 0;
+  if (Math.abs(dCS) >= 50) flags.push([`spread re-mark ${fmtS(dCS,0)} bp`,'warn']);
+  const credit = dCS/10 * (rho||0);
+  const dr = set.rates[i0.ccy] || 0;
+  const rates = dr/10 * (rho||0);
+  const carry = (i0.cpn||0) * days/365;
+  const resid = dP - (eq+eqfx+gamma+vg+credit+rates);
+  return {dP, eq, eqfx, gamma, vega:vg, credit, rates, carry, resid, flags, rS, rPar, dIV:(i0.iv!=null&&i1.iv!=null)?i1.iv-i0.iv:null, dCS};
+}
+
+function run(){
+  const {E0,E1,I0,I1} = S.files; if (!(E0&&E1&&I0&&I1)) return;
+  const set = settings();
+  const extraCcy = new Set(); for (const b of I0.list) if (b.ccy) extraCcy.add(b.ccy);
+  const want = [...extraCcy].filter(c=>!document.querySelector('#rate_'+c));
+  if (want.length){ const cur = settings().rates; buildRates([...extraCcy]); for (const [k,v] of Object.entries(cur)){ const el=document.querySelector('#rate_'+k); if (el) el.value=v; } }
+  const dayAuto = (E0.date&&E1.date) ? Math.round((E1.date-E0.date)/864e5) : 1;
+  const days = set.days!=null && set.days>=0 ? set.days : dayAuto;
+  $('#setDays').placeholder = 'auto: '+dayAuto;
+  const aum = E0.aum || E1.aum || 1;
+  const rows = [], checks = [];
+  const isins = new Set([...Object.keys(E0.cbs), ...Object.keys(E1.cbs)]);
+  for (const isin of isins){
+    const p0 = E0.cbs[isin], p1 = E1.cbs[isin];
+    const i0 = I0.byIsin[isin], i1 = I1.byIsin[isin];
+    const ref = p0||p1;
+    const ccy = (i0&&i0.ccy) || (i1&&i1.ccy) || 'EUR';
+    const fx0 = fxRate(E0,ccy), fx1 = fxRate(E1,ccy);
+    const flags = [];
+    if (fx0==null||fx1==null){ checks.push(`${ref.name}: no EUR/${ccy} rate in the exposure report; skipped.`); continue; }
+    const N0 = p0 ? p0.expo/p0.pct*fx0 : 0, N1 = p1 ? p1.expo/p1.pct*fx1 : 0;
+    const dirty0 = p0 ? p0.pct*100 : null; let dirty1 = p1 ? p1.pct*100 : null;
+    const fxc = set.fx==='t0' ? fx0 : fx1;
+    const row = {isin, name:ref.name, ftse:i0?i0.name:(i1?i1.name:''), ccy, strat:ref.strat||'—', book:ref.book, bics:ref.bics||'—', country:ref.country||'—',
+      region:(i0&&i0.region)||(i1&&i1.region)||'n/a', sector:(i0&&i0.sector)||(i1&&i1.sector)||'n/a', N0, N1, dirty0, dirty1, flags,
+      pts:{}, eur:{}, fxtr:0, i0, i1, p0, p1, w0:(i0&&i0.w)||0};
+    if (!p0){ flags.push(['new position','']); row.pts = zeroComps(); row.pts.total=0; row.eur = zeroComps(); row.eur.total=0; rows.push(row); continue; }
+    if (!p1){ // sold: proxy exit with index price if available
+      if (i0&&i1){ dirty1 = dirty0 + (i1.P - i0.P) + (i0.cpn||0)*days/365; flags.push(['sold — exit proxied by index price','warn']); }
+      else { dirty1 = dirty0; flags.push(['sold — no exit price, P&L set to 0','bad']); }
+      row.dirty1 = dirty1;
+    } else if (Math.abs(N1-N0) > 0.005*Math.abs(N0||1)) flags.push([`nominal ${fmtS((N1/N0-1)*100,1)}%`,'']);
+    const dDirty = dirty1 - dirty0;
+    let pts;
+    if (i0&&i1){
+      const d = decompose(i0,i1,set,days);
+      flags.push(...d.flags);
+      const basis = dDirty - d.carry - d.dP;
+      pts = {eq:d.eq, eqfx:d.eqfx, gamma:d.gamma, vega:d.vega, credit:d.credit, rates:d.rates, carry:d.carry, resid:d.resid, basis, total:dDirty};
+      row.d = d;
+      // cross-checks
+      const bgClean = p0.px!=null && Math.abs(p0.px - dirty0) < 15 ? p0.px : null;
+      if (bgClean!=null && Math.abs(bgClean - i0.P) > 2) flags.push([`price gap vs index ${fmtS(bgClean-i0.P,2)} pt`,'warn']);
+      if (p0.delta!=null && i0.delta!=null && Math.abs(p0.delta*100 - i0.delta) > 10) flags.push([`delta BgAM ${fmtN(p0.delta*100,0)} vs index ${fmtN(i0.delta,0)}`,'']);
+    } else {
+      flags.push(['not in index file — unexplained','bad']);
+      pts = zeroComps(); pts.resid = dDirty; pts.total = dDirty;
+    }
+    const mult = N0/100/fxc;
+    row.pts = pts; row.eur = {}; for (const k in pts) row.eur[k] = pts[k]*mult;
+    row.fxtr = N0*dirty0/100*(1/fx1 - 1/fx0);
+    rows.push(row);
+  }
+  // overlay
+  const ovl = [];
+  const esPx = (E0.overlay.find(o=>/s&p|spx|^es/i.test(o.name+' '+o.und) && o.kind==='Future')||{}).px;
+  for (const o0 of E0.overlay){
+    const o1 = E1.overlay.find(o=>o.name===o0.name);
+    const ccy = ccyOfOverlay(o0); const fx0=fxRate(E0,ccy)||1, fx1=fxRate(E1,ccy)||1;
+    const key = o0.name; const saved = S.overlayS[key]||{};
+    let S0 = saved.S0, S1 = saved.S1;
+    let proxy = false;
+    if (o0.kind==='Option' && S0==null && /s&p|spx/i.test(o0.name+' '+o0.und) && esPx){ S0 = esPx; proxy = true; }
+    let pnl = null, dPart = null, note = '';
+    if (!o1){ note='closed at T1 — P&L n/a'; }
+    else if (o0.kind==='Future'){ pnl = o0.expo * fx0 * (o1.px/o0.px - 1) / fx1; dPart = pnl; }
+    else if (S0 && o0.delta && o0.px!=null && o1.px!=null){
+      const qtyMult = o0.expo*fx0/(o0.delta*S0);
+      pnl = qtyMult*(o1.px - o0.px)/fx1;
+      if (S1) dPart = o0.expo*(S1/S0-1);
+    } else note = 'enter the underlying level at T0';
+    ovl.push({...o0, o1, ccy, S0, S1, proxy, pnl, dPart, note, key});
+  }
+  // benchmark
+  const bench = {comps:zeroComps(), total:0, n:0, dropped:0, byRegion:{}};
+  const wsum = I0.list.reduce((a,b)=>a+(b.w||0),0) || 100;
+  for (const b0 of I0.list){
+    const b1 = I1.byIsin[b0.isin]; if (!b1 || !b0.P || b0.w==null){ bench.dropped++; continue; }
+    const d = decompose(b0,b1,set,days);
+    const w = b0.w/wsum; const f = w/b0.P*1e4; // -> bps of index
+    const reg = b0.region||'n/a'; const R = bench.byRegion[reg] || (bench.byRegion[reg] = {comps:zeroComps(), total:0, w:0});
+    for (const [k] of COMPS){ if (k==='basis') continue; const v = (d[k]||0)*f; bench.comps[k]+=v; R.comps[k]+=v; }
+    const tot = (d.dP + d.carry)*f; bench.total += tot; R.total += tot; R.w += w*100; bench.n++;
+  }
+  // totals
+  const tot = zeroComps(); tot.total=0; let fxtr=0;
+  for (const r of rows){ for (const k in r.eur) tot[k]+=r.eur[k]; fxtr+=r.fxtr; }
+  const ovlTot = ovl.reduce((a,o)=>a+(o.pnl||0),0);
+  S.res = {rows, tot, fxtr, ovl, ovlTot, bench, aum, days, set, checks, dayAuto};
+  render();
+}
+function zeroComps(){ const o={}; for (const [k] of COMPS) o[k]=0; return o; }
+
+/* ===================== rendering ===================== */
+function render(){
+  const R = S.res; if (!R) return;
+  $('#results').hidden = false; $('#emptyState').hidden = true;
+  const {E0,E1,I0,I1} = S.files;
+  $('#period').innerHTML = `<span>Period <b>${fmtDate(E0.date)} → ${fmtDate(E1.date)}</b></span><span>Index data <b>${fmtDate(I0.date)} → ${fmtDate(I1.date)}</b></span><span>AUM <b class="num">${fmtEUR(R.aum)} €</b></span><span>Accrual <b>${R.days} d</b></span><span>CBs <b>${R.rows.length}</b></span>`;
+  renderTiles(); renderWaterfall(); renderContrib(); renderGroups(); renderBonds(); renderOverlay(); renderBench(); renderChecks();
+}
+const bps = v => v/S.res.aum*1e4;
+function renderTiles(){
+  const R=S.res, t=R.tot; const expl = t.eq+t.eqfx+t.gamma+t.vega+t.credit+t.rates;
+  const grand = t.total + R.ovlTot;
+  const tile = (k,v,s,cls='') => `<div class="tile ${cls}"><span class="k">${k}</span><span class="v ${v<0?'neg':v>0?'pos':''}">${fmtS(bps(v),1)} bps</span><span class="s">${fmtS(v,0)} € ${s||''}</span></div>`;
+  $('#tiles').innerHTML =
+    tile('Total P&L (CBs + overlay)', grand, '', 'hero') +
+    tile('Convertibles', t.total) +
+    tile('Explained by index greeks', expl, '· clean move '+fmtS(bps(expl+t.resid),1)+' bps') +
+    tile('Residual', t.resid) +
+    tile('Pricing basis (fund vs index)', t.basis) +
+    tile('Overlay (options, futures)', R.ovlTot) +
+    `<div class="tile"><span class="k">FX translation (memo, hedged)</span><span class="v muted">${fmtS(bps(R.fxtr),1)} bps</span><span class="s">${fmtS(R.fxtr,0)} € · excluded</span></div>`;
+}
+
+/* --- SVG helpers --- */
+const svgEl = (tag, attrs={}, txt) => { const e=document.createElementNS('http://www.w3.org/2000/svg',tag); for (const k in attrs) e.setAttribute(k,attrs[k]); if (txt!=null) e.textContent=txt; return e; };
+const tip = $('#tip');
+function showTip(ev, html){ tip.innerHTML=html; tip.style.display='block'; moveTip(ev); }
+function moveTip(ev){ const w=tip.offsetWidth,h=tip.offsetHeight; let x=ev.clientX+14,y=ev.clientY+14; if (x+w>innerWidth-8) x=ev.clientX-w-14; if (y+h>innerHeight-8) y=ev.clientY-h-14; tip.style.left=x+'px'; tip.style.top=y+'px'; }
+function hideTip(){ tip.style.display='none'; }
+function compTip(title, eur, extra=''){
+  let h=`<b>${esc(title)}</b>`;
+  for (const [k,l] of COMPS){ if (eur[k]==null) continue; h+=`<div class="num"><span class="muted">${l}</span><span>${fmtS(eur[k],0)}</span></div>`; }
+  h+=`<div class="num" style="border-top:1px solid var(--line);margin-top:3px;padding-top:3px"><span>Total</span><span>${fmtS(eur.total,0)} €</span></div>`+extra;
+  return h;
+}
+
+function renderWaterfall(){
+  const R=S.res, t=R.tot, box=$('#waterfall'); box.innerHTML='';
+  const steps = COMPS.map(([k,l])=>({k,l,v:bps(t[k])}));
+  steps.push({k:'ovl', l:'Overlay', v:bps(R.ovlTot)});
+  const total = steps.reduce((a,s)=>a+s.v,0);
+  const W = Math.max(720, box.clientWidth||900), H = 300, padL=46, padR=10, padT=16, padB=54;
+  box.style.overflowX = 'auto';
+  let cum=0, lo=0, hi=0; const bars=[];
+  for (const s of steps){ const a=cum; cum+=s.v; bars.push({...s,a,b:cum}); lo=Math.min(lo,a,cum); hi=Math.max(hi,a,cum); }
+  bars.push({k:'total',l:'Total',v:total,a:0,b:total,tot:true});
+  const span = (hi-lo)||1; const pad=span*0.08; lo-=pad; hi+=pad;
+  const y = v => padT + (hi-v)/(hi-lo)*(H-padT-padB);
+  const n=bars.length, slot=(W-padL-padR)/n, bw=Math.min(54, slot*0.62);
+  const svg = svgEl('svg',{viewBox:`0 0 ${W} ${H}`,role:'img','aria-label':'Waterfall of P&L components in bps'});
+  svg.style.minWidth = '720px';
+  // grid
+  const ticks = niceTicks(lo,hi,5);
+  for (const tv of ticks){ svg.appendChild(svgEl('line',{x1:padL,x2:W-padR,y1:y(tv),y2:y(tv),class:tv===0?'zero':'grid'})); svg.appendChild(svgEl('text',{x:padL-6,y:y(tv)+4,'text-anchor':'end'},fmtN(tv,0))); }
+  bars.forEach((b,i)=>{
+    const x = padL + slot*i + (slot-bw)/2;
+    const top=y(Math.max(b.a,b.b)), h=Math.max(1.5, Math.abs(y(b.a)-y(b.b)));
+    if (i<n-1 && !bars[i+1].tot){ const nx = padL+slot*(i+1)+(slot-bw)/2; svg.appendChild(svgEl('line',{x1:x+bw,x2:nx,y1:y(b.b),y2:y(b.b),class:'conn'})); }
+    const hit = svgEl('rect',{x:padL+slot*i,y:padT,width:slot,height:H-padT-padB,class:'hit'});
+    const rect = svgEl('rect',{x,y:top,width:bw,height:h,rx:2,class:b.tot?'tot':(b.v>=0?'up':'dn')});
+    const eurV = b.k==='ovl'?R.ovlTot:(b.k==='total'?(t.total+R.ovlTot):t[b.k]);
+    const html = `<b>${b.l}</b><div class="num"><span class="muted">bps of AUM</span><span>${fmtS(b.v,2)}</span></div><div class="num"><span class="muted">EUR</span><span>${fmtS(eurV,0)}</span></div>`;
+    hit.addEventListener('mousemove',ev=>showTip(ev,html)); hit.addEventListener('mouseleave',hideTip);
+    svg.appendChild(hit); svg.appendChild(rect);
+    const lab = svgEl('text',{x:x+bw/2,y:(b.v>=0?top-5:top+h+12),'text-anchor':'middle',class:'lab'},fmtS(b.v,1)); svg.appendChild(lab);
+    const cat = svgEl('text',{x:x+bw/2,y:H-padB+16,'text-anchor':'middle',class:'cat'});
+    const words=b.l.split(' '); cat.appendChild(svgEl('tspan',{x:x+bw/2,dy:0},words[0])); if (words[1]) cat.appendChild(svgEl('tspan',{x:x+bw/2,dy:13},words.slice(1).join(' ')));
+    svg.appendChild(cat);
+  });
+  box.appendChild(svg);
+  $('#wfNote').textContent = `Greeks ${R.set.greeks==='mid'?'midpoint':'at T0'} · gamma ${R.set.gamma} · EUR at ${R.set.fx.toUpperCase()} spot · FX translation excluded`;
+}
+function niceTicks(lo,hi,n){ const raw=(hi-lo)/n, p=Math.pow(10,Math.floor(Math.log10(raw))), m=raw/p, step=(m<1.5?1:m<3.5?2:m<7.5?5:10)*p; const out=[]; for (let v=Math.ceil(lo/step)*step; v<=hi; v+=step) out.push(+v.toFixed(6)); return out; }
+
+function hbars(box, items, title){
+  box.innerHTML=''; if (!items.length){ box.innerHTML='<p class="muted small">Nothing to show.</p>'; return; }
+  const W = Math.max(300, box.clientWidth||440), rowH=24, padL=Math.min(190, W*0.4), padR=70, H=items.length*rowH+8;
+  const maxAbs = Math.max(...items.map(i=>Math.abs(i.v)))||1;
+  const svg = svgEl('svg',{viewBox:`0 0 ${W} ${H}`,role:'img','aria-label':title});
+  const neg = items.some(i=>i.v<0), pos = items.some(i=>i.v>0);
+  const labW = 48; // room for the value label at the bar end
+  const x0 = padL + (neg&&!pos ? labW : 0), span = W-padL-padR-(neg&&!pos?labW:0);
+  const zeroX = neg&&pos ? x0+span/2 : (neg ? x0+span : x0);
+  const sc = v => ((neg&&pos ? span/2 : span) - (neg&&pos?labW:0)) * Math.abs(v)/maxAbs;
+  svg.appendChild(svgEl('line',{x1:zeroX,x2:zeroX,y1:0,y2:H,class:'zero'}));
+  items.forEach((it,i)=>{
+    const yy=4+i*rowH, w=sc(it.v), x = it.v>=0 ? zeroX : zeroX-w;
+    const hit=svgEl('rect',{x:0,y:yy,width:W,height:rowH,class:'hit'});
+    hit.addEventListener('mousemove',ev=>showTip(ev,it.tip)); hit.addEventListener('mouseleave',hideTip);
+    svg.appendChild(hit);
+    svg.appendChild(svgEl('rect',{x,y:yy+5,width:Math.max(1.5,w),height:rowH-10,rx:2,class:it.v>=0?'up':'dn'}));
+    const lab=svgEl('text',{x:padL-8,y:yy+rowH/2+4,'text-anchor':'end',class:'cat lab'},it.l.length>26?it.l.slice(0,25)+'…':it.l); svg.appendChild(lab);
+    svg.appendChild(svgEl('text',{x:(it.v>=0?x+w+6:x-6),y:yy+rowH/2+4,'text-anchor':it.v>=0?'start':'end',class:'lab'},fmtS(it.v,1)));
+  });
+  box.appendChild(svg);
+}
+function renderContrib(){
+  const rs = [...S.res.rows].sort((a,b)=>b.eur.total-a.eur.total);
+  const mk = r => ({l:r.name, v:bps(r.eur.total), tip:compTip(r.name, r.eur, `<div class="muted small" style="margin-top:4px">${esc(r.strat)} · ${fmtS(r.d?r.d.rS*100:null,2)}% stock · δ ${fmtN(r.i0?r.i0.delta:null,0)}</div>`)});
+  hbars($('#chTop'), rs.slice(0,10).map(mk), 'Top contributors');
+  hbars($('#chBot'), rs.slice(-10).reverse().filter(r=>r.eur.total<0).map(mk), 'Bottom contributors');
+}
+
+function groupTable(rows, keyFn, label){
+  const g = {}; for (const r of rows){ const k=r[keyFn]||'—'; const G=g[k]||(g[k]={k,n:0,expo:0,eur:zeroComps()}); G.n++; G.expo+=r.p0?r.p0.expo:0; for (const c in r.eur) G.eur[c]=(G.eur[c]||0)+r.eur[c]; }
+  const list = Object.values(g).sort((a,b)=>(b.eur.total||0)-(a.eur.total||0));
+  const tot = {k:'Total',n:rows.length,expo:list.reduce((a,x)=>a+x.expo,0),eur:zeroComps()}; for (const G of list) for (const c in G.eur) tot.eur[c]=(tot.eur[c]||0)+G.eur[c];
+  const maxAbs = Math.max(...list.map(G=>Math.abs(G.eur.total||0)))||1;
+  const head = `<tr><th class="l">${label}</th><th>#</th><th>Exposure €</th><th>Total bps</th><th></th>${COMPS.map(([k,l])=>`<th>${l}</th>`).join('')}<th>Total €</th></tr>`;
+  const line = (G,cls='') => `<tr class="${cls}"><td class="l">${esc(G.k)}</td><td class="num">${G.n}</td><td class="num">${fmtEUR(G.expo)}</td><td class="num ${G.eur.total<0?'neg':'pos'}">${fmtS(bps(G.eur.total||0),1)}</td><td style="width:110px;text-align:left">${cls?'':`<span class="bar" style="width:${Math.abs(G.eur.total||0)/maxAbs*100}px;background:${(G.eur.total||0)<0?'var(--neg)':'var(--pos)'}"></span>`}</td>${COMPS.map(([k])=>`<td class="num">${fmtS(bps(G.eur[k]||0),1)}</td>`).join('')}<td class="num">${fmtS(G.eur.total||0,0)}</td></tr>`;
+  return `<table><thead>${head}</thead><tbody>${list.map(G=>line(G)).join('')}${line(tot,'tot')}</tbody></table><p class="muted small" style="margin-top:6px">Components in bps of AUM.</p>`;
+}
+function renderGroups(){
+  $('#tblStrategy').innerHTML = groupTable(S.res.rows,'strat','Strategy');
+  $('#tblRegion').innerHTML = groupTable(S.res.rows,'region','Index region');
+  $('#tblSector').innerHTML = groupTable(S.res.rows,'sector','Index sector');
+}
+
+const BOND_COLS = [
+  ['name','Bond','l'],['strat','Strategy','l'],['ccy','Ccy','l'],['N0','Nominal T0','n0'],['dirty0','Dirty T0','n3'],['dirty1','Dirty T1','n3'],
+  ['P0','Idx px T0','n2'],['P1','Idx px T1','n2'],['rS','Stock %','n2'],['delta0','δ','n0'],['dIV','ΔIV','n1'],['dCS','ΔCS bp','n0'],
+  ...COMPS.map(([k,l])=>[k,l,'c']), ['total','Total','c'],['flags','Flags','f']
+];
+function bondVal(r,k){
+  switch(k){ case 'P0': return r.i0?r.i0.P:null; case 'P1': return r.i1?r.i1.P:null; case 'rS': return r.d?r.d.rS*100:null; case 'delta0': return r.i0?r.i0.delta:null; case 'dIV': return r.d?r.d.dIV:null; case 'dCS': return r.d?r.d.dCS:null; }
+  if (COMPS.some(([c])=>c===k) || k==='total'){ return S.unit==='eur'?r.eur[k]:S.unit==='bps'?bps(r.eur[k]):r.pts[k]; }
+  return r[k];
+}
+function renderBonds(){
+  const rows=[...S.res.rows]; const {key,dir}=S.sort;
+  rows.sort((a,b)=>{ const x=bondVal(a,key), y=bondVal(b,key); if (typeof x==='string'||typeof y==='string') return String(x||'').localeCompare(String(y||''))*dir; return ((x??-Infinity)-(y??-Infinity))*dir; });
+  const dec = S.unit==='pts'?3:S.unit==='bps'?1:0;
+  const cell = (r,[k,l,t]) => {
+    if (t==='l') return `<td class="l">${esc(r[k])}</td>`;
+    if (t==='f') return `<td class="l">${r.flags.map(([f,c])=>`<span class="flag ${c}">${esc(f)}</span>`).join('')}</td>`;
+    const v=bondVal(r,k);
+    if (t==='c') return `<td class="num ${k==='total'?(v<0?'neg':'pos'):''}">${S.unit==='eur'?fmtS(v,0):fmtS(v,dec)}</td>`;
+    const d=+t.slice(1); return `<td class="num">${k==='N0'?fmtN(v,0):fmtN(v,d)}</td>`;
+  };
+  const tot=S.res.tot; const totv = k => S.unit==='eur'?fmtS(tot[k],0):S.unit==='bps'?fmtS(bps(tot[k]),1):'';
+  $('#tblBonds').innerHTML = `<table><thead><tr>${BOND_COLS.map(([k,l,t])=>`<th class="${t==='l'||t==='f'?'l':''}" data-k="${k}" tabindex="0">${l}${key===k?(dir>0?' ▲':' ▼'):''}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${BOND_COLS.map(c=>cell(r,c)).join('')}</tr>`).join('')}<tr class="tot"><td class="l">Total</td><td colspan="11"></td>${COMPS.map(([k])=>`<td class="num">${totv(k)}</td>`).join('')}<td class="num">${totv('total')}</td><td></td></tr></tbody></table>`;
+  $('#tblBonds').querySelectorAll('th').forEach(th=>{ const h=()=>{ const k=th.dataset.k; S.sort = S.sort.key===k ? {key:k,dir:-S.sort.dir} : {key:k,dir:-1}; renderBonds(); }; th.addEventListener('click',h); th.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();h();}}); });
+}
+function renderOverlay(){
+  const R=S.res; const box=$('#tblOverlay');
+  if (!R.ovl.length){ box.innerHTML='<p class="muted small">No listed options or futures in the exposure report.</p>'; return; }
+  box.innerHTML = `<table><thead><tr><th class="l">Instrument</th><th class="l">Type</th><th class="l">Strategy</th><th>Ccy</th><th>Δ-exposure T0 €</th><th>Δ-exposure T1 €</th><th>δ T0</th><th>Price T0</th><th>Price T1</th><th>Underlying T0</th><th>Underlying T1</th><th>Delta P&L €</th><th>Other €</th><th>Total €</th><th>bps</th><th class="l">Note</th></tr></thead><tbody>
+  ${R.ovl.map(o=>`<tr><td class="l">${esc(o.name)}</td><td class="l">${o.kind}</td><td class="l">${esc(o.strat)}</td><td>${o.ccy}</td><td class="num">${fmtEUR(o.expo)}</td><td class="num">${o.o1?fmtEUR(o.o1.expo):'—'}</td><td class="num">${fmtN(o.delta,3)}</td><td class="num">${fmtN(o.px,2)}</td><td class="num">${o.o1?fmtN(o.o1.px,2):'—'}</td>
+    <td>${o.kind==='Option'?`<input class="tdin" type="number" step="any" data-key="${esc(o.key)}" data-f="S0" value="${o.S0??''}" aria-label="Underlying T0">${o.proxy?'<span class="flag warn">ES proxy</span>':''}`:'—'}</td>
+    <td>${o.kind==='Option'?`<input class="tdin" type="number" step="any" data-key="${esc(o.key)}" data-f="S1" value="${o.S1??''}" aria-label="Underlying T1">`:'—'}</td>
+    <td class="num">${fmtS(o.dPart,0)}</td><td class="num">${o.pnl!=null&&o.dPart!=null?fmtS(o.pnl-o.dPart,0):'—'}</td><td class="num ${o.pnl<0?'neg':o.pnl>0?'pos':''}">${fmtS(o.pnl,0)}</td><td class="num">${o.pnl!=null?fmtS(bps(o.pnl),1):'—'}</td><td class="l muted small">${esc(o.note)}</td></tr>`).join('')}
+  <tr class="tot"><td class="l">Total overlay</td><td colspan="12"></td><td class="num">${fmtS(R.ovlTot,0)}</td><td class="num">${fmtS(bps(R.ovlTot),1)}</td><td></td></tr></tbody></table>`;
+  box.querySelectorAll('input.tdin').forEach(i=>i.addEventListener('change',()=>{ const o=S.overlayS[i.dataset.key]||(S.overlayS[i.dataset.key]={}); o[i.dataset.f]=num(i.value); i.blur(); setTimeout(run,0); }));
+}
+function renderBench(){
+  const B=S.res.bench, P=S.res.tot; const expl = k=>B.comps[k];
+  const pf = k => bps(P[k]);
+  const rowsR = Object.entries(B.byRegion).sort((a,b)=>b[1].w-a[1].w);
+  $('#tblBench').innerHTML = `<table><thead><tr><th class="l">Line</th><th>Weight %</th>${COMPS.filter(([k])=>k!=='basis').map(([k,l])=>`<th>${l}</th>`).join('')}<th>Total bps</th></tr></thead><tbody>
+    <tr class="tot"><td class="l">Index (all constituents, ${B.n} matched${B.dropped?`, ${B.dropped} dropped`:''})</td><td class="num">100</td>${COMPS.filter(([k])=>k!=='basis').map(([k])=>`<td class="num">${fmtS(expl(k),1)}</td>`).join('')}<td class="num ${B.total<0?'neg':'pos'}">${fmtS(B.total,1)}</td></tr>
+    ${rowsR.map(([k,R])=>`<tr><td class="l">${esc(k)}</td><td class="num">${fmtN(R.w,1)}</td>${COMPS.filter(([c])=>c!=='basis').map(([c])=>`<td class="num">${fmtS(R.comps[c],1)}</td>`).join('')}<td class="num">${fmtS(R.total,1)}</td></tr>`).join('')}
+    <tr class="tot"><td class="l">Portfolio (convertibles only, for comparison)</td><td class="num">—</td>${COMPS.filter(([k])=>k!=='basis').map(([k])=>`<td class="num">${fmtS(pf(k),1)}</td>`).join('')}<td class="num ${P.total<0?'neg':'pos'}">${fmtS(pf('total')-pf('basis'),1)}</td></tr>
+  </tbody></table><p class="muted small" style="margin-top:6px">Index lines are contributions in bps of the index; portfolio line excludes pricing basis so both rest on index prices. Region weights from the index file.</p>`;
+}
+function renderChecks(){
+  const R=S.res; const items=[];
+  const flagged = R.rows.filter(r=>r.flags.length);
+  items.push(`<p class="small muted">${R.rows.length} convertibles processed, ${R.rows.filter(r=>r.i0&&r.i1).length} matched to the index on both dates, ${flagged.length} with flags. Days of accrual: ${R.days}${R.set.days!=null?' (manual)':''}.</p>`);
+  if (R.checks.length) items.push(`<ul class="small">${R.checks.map(c=>`<li>${esc(c)}</li>`).join('')}</ul>`);
+  const e0=S.files.E0, e1=S.files.E1;
+  const sameClose = e0.date && S.files.I0.date && e0.date.getTime()!==S.files.I0.date.getTime();
+  if (sameClose) items.push(`<p class="note">Exposure and index dates differ (${fmtDate(e0.date)} vs ${fmtDate(S.files.I0.date)}). Check the files reflect the same closes; the method assumes they do.</p>`);
+  const notIdx = R.rows.filter(r=>!(r.i0&&r.i1));
+  const bigBasis = R.rows.filter(r=>Math.abs(r.pts.basis||0)>0.75).sort((a,b)=>Math.abs(b.pts.basis)-Math.abs(a.pts.basis));
+  items.push(`<div class="two"><div><h3>Position changes</h3><table><thead><tr><th class="l">Bond</th><th>Nominal T0</th><th>Nominal T1</th><th>Change</th></tr></thead><tbody>${R.rows.filter(r=>Math.abs(r.N1-r.N0)>0.005*Math.abs(r.N0||1)).map(r=>`<tr><td class="l">${esc(r.name)}</td><td class="num">${fmtN(r.N0,0)}</td><td class="num">${fmtN(r.N1,0)}</td><td class="num">${r.N0?fmtS((r.N1/r.N0-1)*100,1)+'%':'new'}</td></tr>`).join('')||'<tr><td class="l muted" colspan="4">None</td></tr>'}</tbody></table></div>
+  <div><h3>Pricing basis above 0.75 pt</h3><table><thead><tr><th class="l">Bond</th><th>Fund Δclean</th><th>Index ΔP</th><th>Basis pt</th><th>Basis €</th></tr></thead><tbody>${bigBasis.map(r=>`<tr><td class="l">${esc(r.name)}</td><td class="num">${fmtS(r.pts.total-r.pts.carry,3)}</td><td class="num">${fmtS(r.d?r.d.dP:null,3)}</td><td class="num">${fmtS(r.pts.basis,3)}</td><td class="num">${fmtS(r.eur.basis,0)}</td></tr>`).join('')||'<tr><td class="l muted" colspan="5">None</td></tr>'}</tbody></table></div></div>`);
+  items.push(`<h3 style="margin-top:14px">All flags</h3><table><thead><tr><th class="l">Bond</th><th class="l">Flags</th></tr></thead><tbody>${flagged.map(r=>`<tr><td class="l">${esc(r.name)}</td><td class="l">${r.flags.map(([f,c])=>`<span class="flag ${c}">${esc(f)}</span>`).join('')}</td></tr>`).join('')||'<tr><td class="l muted" colspan="2">No flags</td></tr>'}</tbody></table>`);
+  if (notIdx.length) items.push(`<p class="note" style="margin-top:10px">${notIdx.length} bond(s) not found in the index file: their P&L is carried in the residual.</p>`);
+  $('#checks').innerHTML = items.join('');
+}
+
+/* ===================== export ===================== */
+function csv(){
+  const R=S.res; const cols=['isin','name','ftse','strat','ccy','region','sector','N0','N1','dirty0','dirty1','P0','P1','S0','S1','par0','par1','delta0','delta1','iv0','iv1','cs0','cs1',...COMPS.map(c=>c[0]+'_pts'),'total_pts',...COMPS.map(c=>c[0]+'_eur'),'total_eur','fxtr_eur','flags'];
+  const q = v => v==null?'':(typeof v==='number'?String(Math.round(v*1e6)/1e6):'"'+String(v).replace(/"/g,'""')+'"');
+  const lines=[cols.join(',')];
+  for (const r of R.rows){
+    const i0=r.i0||{}, i1=r.i1||{};
+    const v={isin:r.isin,name:r.name,ftse:r.ftse,strat:r.strat,ccy:r.ccy,region:r.region,sector:r.sector,N0:r.N0,N1:r.N1,dirty0:r.dirty0,dirty1:r.dirty1,P0:i0.P,P1:i1.P,S0:i0.S,S1:i1.S,par0:i0.par,par1:i1.par,delta0:i0.delta,delta1:i1.delta,iv0:i0.iv,iv1:i1.iv,cs0:i0.cs,cs1:i1.cs,fxtr_eur:r.fxtr,flags:r.flags.map(f=>f[0]).join('; ')};
+    for (const [k] of COMPS){ v[k+'_pts']=r.pts[k]; v[k+'_eur']=r.eur[k]; } v.total_pts=r.pts.total; v.total_eur=r.eur.total;
+    lines.push(cols.map(c=>q(v[c])).join(','));
+  }
+  return lines.join('\n');
+}
+$('#btnCsv').addEventListener('click',()=>{ if(!S.res) return; const b=new Blob([csv()],{type:'text/csv'}); const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download=`cb_pnl_attribution_${fmtDate(S.files.E1.date).replace(/ /g,'')}.csv`; document.body.appendChild(a); a.click(); a.remove(); toast('If nothing downloaded, use Copy CSV.'); });
+$('#btnCopy').addEventListener('click',async()=>{ if(!S.res) return; const t=csv(); try{ await navigator.clipboard.writeText(t); toast('CSV copied to clipboard'); }catch(e){ const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); toast('Select and copy the text'); } });
+$('#unit').addEventListener('change',e=>{ S.unit=e.target.value; renderBonds(); });
+
+/* ===================== UI wiring ===================== */
+const drop=$('#drop');
+['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('over');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('over');}));
+drop.addEventListener('drop',e=>handleFiles(e.dataTransfer.files));
+$('#files').addEventListener('change',e=>{ handleFiles(e.target.files); e.target.value=''; });
+$('#btnClear').addEventListener('click',()=>{ S.parsed=[]; S.res=null; S.overlayS={}; assignSlots(); $('#results').hidden=true; $('#emptyState').hidden=false; $('#period').innerHTML='<span>No period loaded</span>'; });
+$('#tabs').addEventListener('click',e=>{ const b=e.target.closest('.tab'); if(!b) return; document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',t===b)); document.querySelectorAll('.view').forEach(v=>v.hidden = v.id!=='view-'+b.dataset.view); store('cbpnl.tab',b.dataset.view); if (S.res){ renderContrib(); } });
+(function restoreTab(){ const t=load('cbpnl.tab',null); const b=t&&document.querySelector(`.tab[data-view="${t}"]`); if(b) b.click(); })();
+let rt; addEventListener('resize',()=>{ clearTimeout(rt); rt=setTimeout(()=>{ if(S.res){ renderWaterfall(); renderContrib(); } },150); });
+
+/* ===================== sample data (fictitious) ===================== */
+function demo(){
+  const mk = (isin,name,ccy,cpn,P0,P1,S0,S1,par0,par1,d0,d1,cs0,cs1,iv0,iv1,gam,rho,vega,region,sector,w) => ({
+    i0:{isin,name,ccy,cpn,P:P0,S:S0,par:par0,delta:d0,cs:cs0,iv:iv0,gamma:gam,rho,vega,region,sector,w,inv:80,dur:4},
+    i1:{isin,name,ccy,cpn,P:P1,S:S1,par:par1,delta:d1,cs:cs1,iv:iv1,gamma:gam,rho,vega,region,sector,w,inv:80,dur:4}});
+  const bonds=[
+    mk('XS0000000001','Sample Semicap 0.5% 2031','EUR',0.5,98.4,100.1,41.2,42.6,61.0,63.1,58,60,150,150,38,38.6,0.45,-0.30,0.42,'Europe','Electronics',0.15),
+    mk('US000000AA01','Sample Cloud 0.25% 2030','USD',0.25,91.2,90.1,118.3,116.9,52.4,51.8,42,41,220,220,45,44.2,0.38,-0.25,0.36,'US','Software',0.22),
+    mk('XS0000000003','Sample Insurer 0% 2030','HKD',0,104.1,104.6,58.9,59.3,95.1,95.7,62,62.5,140,140,30,30,0.35,-0.20,0.30,'Asia','Financials',0.10),
+    mk('XS0000000004','Sample Steel 0% 2031','JPY',0,107.3,106.2,3410,3362,92.8,91.5,55,54,60,60,27,27.5,0.40,-0.22,0.33,'Japan','Materials',0.12),
+    mk('FR0000000005','Sample Utility 1.5% 2033','EUR',1.5,105.9,106.4,101.2,101.9,79.1,79.6,60,60.4,75,75,24,23.5,0.36,-0.33,0.29,'Europe','Utilities',0.18)];
+  const E=(date,k)=>({kind:'expo',title:'Sample book',date,fx:{'EUR/USD':k?1.1144:1.1177,'EUR/JPY':k?175.95:176.16,'EUR/HKD':k?8.743:8.770},aum:80e6,cbs:{},overlay:[{name:'LISTED xSPX 6700 EC 17th Dec 27',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Option',expo:k?12.28e6:12.06e6,delta:k?0.8435:0.8359,px:k?1507.39:1464.86,country:'United States of America'},{name:'Fut S&P 500 Index DEC26',und:'S&P 500 INDEX',strat:'CB2. DELTA USA',kind:'Future',expo:k?-1.7467e6:-1.7308e6,delta:1,px:k?7763:7715.75,country:'United States of America'}],fname:'sample_exposure_'+(k?'T1':'T0')+'.xlsx'});
+  const E0=E(new Date(Date.UTC(2026,9,27)),0), E1=E(new Date(Date.UTC(2026,9,28)),1);
+  const nom={XS0000000001:1.5e6,US000000AA01:2e6,XS0000000003:16e6,XS0000000004:300e6,FR0000000005:2.5e6};
+  const strat={EUR:'CB3. DELTA EUROPE',USD:'CB2. DELTA USA',HKD:'CB4. DELTA ASIA',JPY:'CB4. DELTA ASIA'};
+  for (const b of bonds){ for (const [Ex,i,k] of [[E0,b.i0,0],[E1,b.i1,1]]){ const acc=(i.cpn||0)*(k?120:119)/365; const dirty=(i.P+(k?0.03:0)-(k?0.02:0))+acc; const fx=Ex.fx['EUR/'+i.ccy]||1; Ex.cbs[i.isin]={isin:i.isin,name:i.name,strat:strat[i.ccy],book:'SAMPLE',bics:i.sector,country:i.region,expo:nom[i.isin]/fx*dirty/100,pct:dirty/100,px:i.P,delta:i.delta/100,iv:i.iv/100,parity:i.par,cs:i.cs,dur:4}; } }
+  const I=(date,k)=>{ const list=bonds.map(b=>k?b.i1:b.i0); const byIsin={}; for (const r of list) byIsin[r.isin]=r; return {kind:'index',date,byIsin,list,fname:'sample_index_'+(k?'T1':'T0')+'.xls'}; };
+  S.parsed=[E0,E1,I(new Date(Date.UTC(2026,9,27)),0),I(new Date(Date.UTC(2026,9,28)),1)];
+  assignSlots(); toast('Sample data: five fictitious bonds, not a real book');
+}
+$('#btnDemo').addEventListener('click',demo);
+</script>
+
+</body>
+</html>
